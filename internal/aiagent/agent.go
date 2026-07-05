@@ -168,3 +168,25 @@ type ChatEventMsg struct {
 	Done    bool // session ended
 	Err     error
 }
+
+
+// FlycheckResultMsg wraps the result of AIAgent.Flycheck.
+type FlycheckResultMsg struct {
+	Payload *protocol.CommandResultPayload
+	Err     error
+}
+
+// SubcommandResultMsg is a generic result wrapper for subcommand-group
+// methods (History, Skill, Memory, Project, Role, Tool, Mail, Service).
+type SubcommandResultMsg struct {
+	Payload *protocol.CommandResultPayload
+	Err     error
+	Subcmd  string // which subcommand was invoked
+}
+
+// ChatSessionReadyMsg is emitted when a chat session has been created
+// (or failed).  The TUI waits for this before entering StateChatting.
+type ChatSessionReadyMsg struct {
+	Session *ChatSession
+	Err     error
+}
