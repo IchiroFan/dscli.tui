@@ -1,4 +1,4 @@
-# dscli.tui — Phase B: Model Refactoring
+# dscli.tui — Phase C: Test Suite
 
 ## Status: ✅ Complete
 
@@ -6,20 +6,30 @@
 
 | File | Change |
 |------|--------|
-| `go.mod` | Add `bubbles v1.0.0` dependency |
-| `internal/tui/model.go` | `AppState` → `Screen`, `state` → `screen`, export `Width`/`Height`, replace `chatInput []rune` / `askInput []rune` with `textinput.Model`, add `spinner.Model`, add `chatScroll`/`chatScrollMax`, `askPrevState` → `prevScreen` |
-| `internal/tui/styles.go` | Add `SpinnerStyle` / `SpinnerDoneStyle` |
-| `internal/tui/update.go` | Update all state/screen refs, use `textinput.Model` API, add `spinner.TickMsg` handler, add PgUp/PgDn scroll support |
-| `internal/tui/view.go` | Update all refs, use `textinput.View()`, add spinner animation, add scroll indicators, use lipgloss styles |
+| `internal/tui/model_test.go` | 30 tests covering Model, Update, View, helpers, and full chat flow |
 
-### Key Decisions
+### Test Coverage
 
-1. **`textinput.Model`** replaces manual `[]rune` + cursor management — handles cursor movement, blinking, paste, and selection automatically
-2. **`spinner.Model`** runs always in the background via `Init()` → harmless when `spinnerOn == false`
-3. **`chatScroll`** tracks user-scrolled offset from bottom (0 = auto-scroll follow)
-4. **Exported `Width`/`Height`** enables styles to reference terminal dimensions
-5. **`prevScreen`** generalizes `askPrevState` — stores any previous screen
+| Category | Tests | What's covered |
+|----------|-------|----------------|
+| **Model** | 4 | Constructor, Init, Agent(), SelectedMenuItem bounds |
+| **Global Messages** | 3 | WindowSize, Ctrl+C, size clamping |
+| **Main Menu** | 5 | Navigation (up/down/j/k), select chat, select quit, quit key, back nav |
+| **Running Cmd** | 4 | All result types, error, nil payload, failed result |
+| **Show Output** | 2 | Any key (deferred), non-key ignored |
+| **Chatting** | 8 | Session ready (ok/error), event error/done, enter (with/empty), esc, scroll (pgup/pgdn) |
+| **handleChatEvent** | 7 | Ready (with/without pending), chunk (append), chunk invalid, done, askUser, status, goodbye, unknown |
+| **AskUser Modal** | 4 | Confirm (y/Y/n/esc/other), choice (nav/enter/space/esc), input (enter/trim/esc/routing), non-key routing |
+| **Helpers** | 4 | appendToLastAssistant (create/append/non-assistant), waitForMoreChatEvents (with/without session), formatCommandResult (error/nil/failure/success), resumeFromAskUser (chat/non-chat) |
+| **View** | 7 | MainMenu, RunningCmd, ShowOutput (success/failure/hint), Chatting (history/loading/done/pending/scroll), AskUser (confirm/choice/input), Quitting, Default |
+| **Utility** | 1 | wrapText (empty/short/long/exact/negative/zero width) |
+| **Edge Cases** | 5 | Text input routing, SpinnerTick, ScreenQuitting, DefaultScreen, executeSelected state |
+| **Integration** | 1 | FullChatFlow — end-to-end chat simulation |
 
-### Next: Phase C — Test Suite
+### Key Decisions & Discoveries
 
-Add unit tests for Model, Update, View.
+1. **`tea.KeyMsg{Type: tea.KeyRunes}` required**: In bubbletea v1.3+, `KeyRunes = -1` (not `iota=0`). A zero-value `KeyMsg{Runes: []rune{'j'}}` has `Type=0` → `String() = "ctrl+@"`, not `"j"`. Always use `tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}`.
+
+2. **Un-exported `close` field on `ChatSession`**: The `close` field is lowercase, so tests in a different package cannot set it. Mock sessions with `nil` close cause panics when `Close()` is called. Tests work around this by either not setting `chatSession` or clearing it before code paths that call `Close()`.
+
+3. **`cmdBackToMenu()` defers state changes**: Returns a command that produces `navBackToMenuMsg`. The screen transition happens in the *next* `Update` call, not immediately. Tests check that the command is non-nil rather than expecting immediate screen change.
