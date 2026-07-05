@@ -3,8 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"unicode"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"gitcode.com/dscli/dscli.tui/internal/aiagent"
@@ -18,31 +18,43 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle global messages first (window size, errors, quit).
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.Width = msg.Width
+		m.Height = msg.Height
+		// Resize text inputs proportionally.
+		inputWidth := msg.Width - 10
+		if inputWidth < 10 {
+			inputWidth = 10
+		}
+		m.chatInput.Width = inputWidth
+		m.askInput.Width = inputWidth - 4
 		return m, nil
 
 	case tea.KeyMsg:
 		// Global key: Ctrl+C always quits.
 		if msg.String() == "ctrl+c" {
-			m.state = StateQuitting
+			m.screen = ScreenQuitting
 			return m, tea.Quit
 		}
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	}
 
-	// Route by state.
-	switch m.state {
-	case StateMainMenu:
+	// Route by screen.
+	switch m.screen {
+	case ScreenMainMenu:
 		return m.updateMainMenu(msg)
-	case StateRunningCmd:
+	case ScreenRunningCmd:
 		return m.updateRunningCmd(msg)
-	case StateShowOutput:
+	case ScreenShowOutput:
 		return m.updateShowOutput(msg)
-	case StateChatting:
+	case ScreenChatting:
 		return m.updateChatting(msg)
-	case StateAskUser:
+	case ScreenAskUser:
 		return m.updateAskUser(msg)
-	case StateQuitting:
+	case ScreenQuitting:
 		return m, tea.Quit
 	default:
 		return m, nil
@@ -71,7 +83,7 @@ func (m *RootModel) updateMainMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.executeSelected()
 
 		case "q":
-			m.state = StateQuitting
+			m.screen = ScreenQuitting
 			return m, tea.Quit
 		}
 	}
@@ -79,7 +91,7 @@ func (m *RootModel) updateMainMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle navigation back to menu (from other states).
 	switch msg.(type) {
 	case navBackToMenuMsg:
-		m.state = StateMainMenu
+		m.screen = ScreenMainMenu
 		m.err = nil
 		return m, nil
 	}
@@ -96,65 +108,67 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 
 	switch idx {
 	case 0: // Chat
-		m.state = StateChatting
+		m.screen = ScreenChatting
 		m.chatHistory = nil
-		m.chatInput = nil
-		m.chatCursor = 0
+		m.chatInput.SetValue("")
+		m.chatInput.Focus()
+		m.spinnerOn = true
 		m.chatLoading = true
 		m.chatReady = false
 		m.chatDone = false
+		m.chatScroll = 0
 		return m, cmdStartChat(m.agent, nil)
 
 	case 1: // Balance
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdBalance(m.agent)
 
 	case 2: // Models
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdModels(m.agent)
 
 	case 3: // Version
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdVersion(m.agent)
 
 	case 4: // Flycheck
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdFlycheck(m.agent)
 
 	case 5: // History
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.History, "list")
 
 	case 6: // Skill
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Skill, "list")
 
 	case 7: // Memory
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Memory, "search")
 
 	case 8: // Project
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Project, "list")
 
 	case 9: // Role
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Role, "list")
 
 	case 10: // Tool
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Tool, "list")
 
 	case 11: // Mail
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Mail, "list")
 
 	case 12: // Service
-		m.state = StateRunningCmd
+		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Service, "list")
 
 	case 13: // Quit
-		m.state = StateQuitting
+		m.screen = ScreenQuitting
 		return m, tea.Quit
 
 	default:
@@ -169,31 +183,31 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case aiagent.BalanceResultMsg:
 		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
 		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		m.state = StateShowOutput
+		m.screen = ScreenShowOutput
 		return m, nil
 
 	case aiagent.ModelsResultMsg:
 		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
 		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		m.state = StateShowOutput
+		m.screen = ScreenShowOutput
 		return m, nil
 
 	case aiagent.VersionResultMsg:
 		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
 		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		m.state = StateShowOutput
+		m.screen = ScreenShowOutput
 		return m, nil
 
 	case aiagent.FlycheckResultMsg:
 		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
 		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		m.state = StateShowOutput
+		m.screen = ScreenShowOutput
 		return m, nil
 
 	case aiagent.SubcommandResultMsg:
 		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
 		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		m.state = StateShowOutput
+		m.screen = ScreenShowOutput
 		return m, nil
 
 	// Catch-all: if we receive any other message while running, ignore.
@@ -221,14 +235,13 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case aiagent.ChatSessionReadyMsg:
 		if msg.Err != nil {
 			m.err = fmt.Errorf("chat session error: %w", msg.Err)
-			m.state = StateShowOutput
+			m.screen = ScreenShowOutput
 			m.cmdOutput = m.err.Error()
 			m.cmdSuccess = false
 			return m, nil
 		}
 		m.chatSession = msg.Session
 		m.chatReady = true
-		// Keep loading true if there's a pending message waiting to be sent.
 		m.chatLoading = (m.chatPendingInput != "")
 		return m, nil
 
@@ -237,11 +250,13 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.err = msg.Err
 			m.chatLoading = false
+			m.spinnerOn = false
 			return m, nil
 		}
 		if msg.Done {
 			m.chatLoading = false
 			m.chatDone = true
+			m.spinnerOn = false
 			return m, nil
 		}
 		return m.handleChatEvent(msg.Message)
@@ -263,17 +278,19 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmdBackToMenu()
 
 		case "enter":
-			input := strings.TrimSpace(string(m.chatInput))
+			input := strings.TrimSpace(m.chatInput.Value())
 			if input == "" {
 				return m, nil
 			}
 
 			// Save pending input (will be added to history on Done).
 			m.chatPendingInput = input
-			m.chatInput = nil
-			m.chatCursor = 0
+			m.chatInput.SetValue("")
+			m.chatInput.Blur()
 			m.chatLoading = true
+			m.spinnerOn = true
 			m.chatDone = false
+			m.chatScroll = 0
 
 			// Close old session if still alive.
 			if m.chatSession != nil {
@@ -283,49 +300,30 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Start a new session for this exchange.
 			return m, cmdStartChat(m.agent, m.chatHistory)
 
-		case "backspace":
-			if len(m.chatInput) > 0 && m.chatCursor > 0 {
-				m.chatInput = append(m.chatInput[:m.chatCursor-1], m.chatInput[m.chatCursor:]...)
-				m.chatCursor--
+		case "pgup", "shift+up":
+			if m.chatScroll < m.chatScrollMax {
+				m.chatScroll++
 			}
 			return m, nil
 
-		case "left":
-			if m.chatCursor > 0 {
-				m.chatCursor--
+		case "pgdown", "shift+down":
+			if m.chatScroll > 0 {
+				m.chatScroll--
 			}
-			return m, nil
-
-		case "right":
-			if m.chatCursor < len(m.chatInput) {
-				m.chatCursor++
-			}
-			return m, nil
-
-		case "home":
-			m.chatCursor = 0
-			return m, nil
-
-		case "end":
-			m.chatCursor = len(m.chatInput)
 			return m, nil
 		}
 
-		// Printable characters: append to input buffer.
-		if len(msg.String()) == 1 {
-			r := []rune(msg.String())[0]
-			if unicode.IsPrint(r) {
-				// Insert at cursor position.
-				m.chatInput = append(m.chatInput[:m.chatCursor],
-					append([]rune{r}, m.chatInput[m.chatCursor:]...)...)
-				m.chatCursor++
-			}
-		}
+		// Route remaining key messages to the textinput.
+		var cmd tea.Cmd
+		m.chatInput, cmd = m.chatInput.Update(msg)
+		return m, cmd
 
-		return m, nil
+	default:
+		// Route non-key messages (e.g. paste) to textinput.
+		var cmd tea.Cmd
+		m.chatInput, cmd = m.chatInput.Update(msg)
+		return m, cmd
 	}
-
-	return m, nil
 }
 
 // handleChatEvent processes a single protocol message from dscli during chat.
@@ -343,7 +341,7 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 	case protocol.TypeChatChunk:
 		p, ok := msg.Payload.(*protocol.ChatChunkPayload)
 		if !ok {
-			return m, nil
+			return m, m.waitForMoreChatEvents()
 		}
 		// Accumulate the last assistant message in history.
 		m.appendToLastAssistant(p.Content, p.Reasoning)
@@ -352,14 +350,14 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 	case protocol.TypeChatDone:
 		m.chatLoading = false
 		m.chatDone = true
+		m.spinnerOn = false
+		m.chatInput.Focus()
 
 		// Commit the exchange to permanent chat history.
 		if m.chatPendingInput != "" {
 			m.chatHistory = append(m.chatHistory,
 				ChatLine{Role: "user", Content: m.chatPendingInput})
 			m.chatPendingInput = ""
-			// Assistant response was already accumulated by
-			// appendToLastAssistant via chunk events.
 		}
 
 		// Close the session process.
@@ -372,16 +370,16 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 	case protocol.TypeAskUser:
 		p, ok := msg.Payload.(*protocol.AskUserPayload)
 		if !ok {
-			return m, nil
+			return m, m.waitForMoreChatEvents()
 		}
 		// Enter modal state.
-		m.askPrevState = StateChatting
-		m.state = StateAskUser
+		m.prevScreen = ScreenChatting
+		m.screen = ScreenAskUser
 		m.askQuestion = p.Question
 		m.askSemantic = p.Semantic
 		m.askOptions = p.Options
-		m.askInput = nil
-		m.askCursor = 0
+		m.askInput.SetValue("")
+		m.askInput.Focus()
 		m.askChoice = 0
 		m.askDone = false
 		m.askResponse = nil
@@ -394,6 +392,8 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 	case protocol.TypeGoodbye:
 		m.chatLoading = false
 		m.chatDone = true
+		m.spinnerOn = false
+		m.chatInput.Focus()
 		if m.chatSession != nil {
 			m.chatSession.Close() //nolint:errcheck
 			m.chatSession = nil
@@ -437,6 +437,11 @@ func (m *RootModel) updateAskUser(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case protocol.SemanticInput:
 			return m.updateAskUserInput(msg)
 		}
+	default:
+		// Route non-key messages (e.g. paste) to askInput.
+		var cmd tea.Cmd
+		m.askInput, cmd = m.askInput.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -489,69 +494,38 @@ func (m *RootModel) updateAskUserChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *RootModel) updateAskUserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		input := strings.TrimSpace(string(m.askInput))
+		input := strings.TrimSpace(m.askInput.Value())
 		m.askDone = true
 		m.askResponse = &protocol.AskUserResponsePayload{Value: input}
 		return m.resumeFromAskUser()
-
-	case "backspace":
-		if len(m.askInput) > 0 && m.askCursor > 0 {
-			m.askInput = append(m.askInput[:m.askCursor-1], m.askInput[m.askCursor:]...)
-			m.askCursor--
-		}
-		return m, nil
-
-	case "left":
-		if m.askCursor > 0 {
-			m.askCursor--
-		}
-		return m, nil
-
-	case "right":
-		if m.askCursor < len(m.askInput) {
-			m.askCursor++
-		}
-		return m, nil
-
-	case "home":
-		m.askCursor = 0
-		return m, nil
-
-	case "end":
-		m.askCursor = len(m.askInput)
-		return m, nil
 
 	case "esc":
 		m.askDone = true
 		m.askResponse = &protocol.AskUserResponsePayload{Value: ""}
 		return m.resumeFromAskUser()
-	}
 
-	// Printable characters.
-	if len(msg.String()) == 1 {
-		r := []rune(msg.String())[0]
-		if unicode.IsPrint(r) {
-			m.askInput = append(m.askInput[:m.askCursor],
-				append([]rune{r}, m.askInput[m.askCursor:]...)...)
-			m.askCursor++
-		}
+	default:
+		// Route all other keys to the textinput model.
+		var cmd tea.Cmd
+		m.askInput, cmd = m.askInput.Update(msg)
+		return m, cmd
 	}
-	return m, nil
 }
 
 // resumeFromAskUser restores the state before the AskUser modal and sends
 // the user's response back to dscli (if coming from chat).
 func (m *RootModel) resumeFromAskUser() (tea.Model, tea.Cmd) {
-	prev := m.askPrevState
-	m.askPrevState = StateMainMenu
+	prev := m.prevScreen
+	m.prevScreen = ScreenMainMenu
 
-	if prev == StateChatting && m.chatSession != nil && m.askResponse != nil {
-		m.state = StateChatting
+	if prev == ScreenChatting && m.chatSession != nil && m.askResponse != nil {
+		m.screen = ScreenChatting
 		m.chatLoading = true // waiting for more events
+		m.chatInput.Blur()
 		return m, cmdSendAskUserResponse(m.chatSession, m.askResponse)
 	}
 
 	// Fallback: return to main menu.
-	m.state = StateMainMenu
+	m.screen = ScreenMainMenu
 	return m, nil
 }

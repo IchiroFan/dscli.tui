@@ -1,37 +1,39 @@
 // Package tui implements the Bubble Tea application for dscli.tui.
 //
 // Architecture: the main model (RootModel) is a finite state machine.
-// Each AppState maps to a distinct view and behavior.  Transitions are
+// Each Screen maps to a distinct view and behavior.  Transitions are
 // caused by user input (keyboard) or asynchronous agent results.
 package tui
 
 import (
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"gitcode.com/dscli/dscli.tui/internal/aiagent"
 	"gitcode.com/dscli/dscli.tui/internal/tui/protocol"
 )
 
-// ─── AppState ────────────────────────────────────────────────────────
+// ─── Screen ────────────────────────────────────────────────────────
 
-// AppState represents the current application state.
-type AppState int
+// Screen represents the current application screen.
+type Screen int
 
 const (
-	// StateMainMenu shows the command palette. This is the initial state.
-	StateMainMenu AppState = iota
-	// StateRunningCmd is a transient state: a non-interactive command has
+	// ScreenMainMenu shows the command palette. This is the initial state.
+	ScreenMainMenu Screen = iota
+	// ScreenRunningCmd is a transient state: a non-interactive command has
 	// been dispatched and we are waiting for the result.
-	StateRunningCmd
-	// StateShowOutput displays the result of a non-interactive command.
-	StateShowOutput
-	// StateChatting is the interactive chat view.
-	StateChatting
-	// StateAskUser is a modal overlay: dscli has asked a question and the
+	ScreenRunningCmd
+	// ScreenShowOutput displays the result of a non-interactive command.
+	ScreenShowOutput
+	// ScreenChatting is the interactive chat view.
+	ScreenChatting
+	// ScreenAskUser is a modal overlay: dscli has asked a question and the
 	// user must answer before the conversation can continue.
-	StateAskUser
-	// StateQuitting performs graceful shutdown.
-	StateQuitting
+	ScreenAskUser
+	// ScreenQuitting performs graceful shutdown.
+	ScreenQuitting
 )
 
 // ─── MenuItem ────────────────────────────────────────────────────────
@@ -56,31 +58,31 @@ type ChatLine struct {
 //
 // State machine overview:
 //
-//	StateMainMenu ←── StateShowOutput (any key → back to menu)
+//	ScreenMainMenu ←── ScreenShowOutput (any key → back to menu)
 //	    │  │
-//	    │  └──(chat selected)──→ StateChatting
+//	    │  └──(chat selected)──→ ScreenChatting
 //	    │                           │
 //	    │                  (ask_user received)
 //	    │                           │
-//	    │                           └──→ StateAskUser
+//	    │                           └──→ ScreenAskUser
 //	    │                                   │
 //	    │                          (user responds)
 //	    │                                   │
-//	    │                           └──→ StateChatting (resume)
+//	    │                           └──→ ScreenChatting (resume)
 //	    │
-//	    └──(command selected)──→ StateRunningCmd
+//	    └──(command selected)──→ ScreenRunningCmd
 //	                                │
 //	                        (result received)
 //	                                │
-//	                        └──→ StateShowOutput
+//	                        └──→ ScreenShowOutput
 type RootModel struct {
 	// Core
-	state AppState
-	agent aiagent.AIAgent
+	screen Screen
+	agent  aiagent.AIAgent
 
-	// Terminal dimensions (updated by tea.WindowSizeMsg)
-	width  int
-	height int
+	// Terminal dimensions (updated by tea.WindowSizeMsg, exported for styles)
+	Width  int
+	Height int
 
 	// Global error (cleared after display)
 	err error
@@ -95,23 +97,27 @@ type RootModel struct {
 
 	// ── Chat ──────────────────────────────────────────────────────
 	chatHistory      []ChatLine           // accumulated conversation
-	chatInput        []rune               // current input buffer
-	chatCursor       int                  // cursor position inside input buffer
+	chatInput        textinput.Model      // chat message input
 	chatLoading      bool                 // true while waiting for AI response
 	chatSession      *aiagent.ChatSession // active session (one per exchange)
 	chatDone         bool                 // true when the current exchange is done
 	chatPendingInput string               // user message waiting to be sent to dscli
+	chatScroll       int                  // 0 = bottom, >0 = lines scrolled up
+	chatScrollMax    int                  // max scroll offset from last render
+
+	// ── Spinner (loading animation) ────────────────────────────────
+	spinner   spinner.Model
+	spinnerOn bool // true when spinner should be rendered
 
 	// ── AskUser modal ─────────────────────────────────────────────
-	askPrevState  AppState        // state to restore after answering
-	askQuestion   string
-	askSemantic   protocol.Semantic
-	askOptions    []string
-	askInput      []rune   // for SemanticInput
-	askCursor     int      // cursor inside askInput
-	askChoice     int      // for SemanticChoice (-1 = unselected)
-	askDone       bool     // true after user has answered
-	askResponse   *protocol.AskUserResponsePayload
+	prevScreen  Screen                         // screen to restore after answering
+	askQuestion string
+	askSemantic protocol.Semantic
+	askOptions  []string
+	askInput    textinput.Model                // for SemanticInput
+	askChoice   int                            // for SemanticChoice (0 = first option)
+	askDone     bool                           // true after user has answered
+	askResponse *protocol.AskUserResponsePayload
 
 	// ── Internal flags ────────────────────────────────────────────
 	chatReady bool // true after first ready event in current exchange
@@ -140,24 +146,43 @@ var defaultMenuItems = []MenuItem{
 
 // New creates a new RootModel with the given agent.
 func New(agent aiagent.AIAgent) *RootModel {
+	chatInput := textinput.New()
+	chatInput.Placeholder = "Type your message..."
+	chatInput.Focus()
+	chatInput.CharLimit = 0 // no limit
+	chatInput.Width = 40   // placeholder, resized on WindowSizeMsg
+
+	askInput := textinput.New()
+	askInput.Placeholder = "Type your answer..."
+	askInput.Focus()
+	askInput.CharLimit = 0
+	askInput.Width = 40
+
+	sp := spinner.New()
+	sp.Style = SpinnerStyle
+
 	return &RootModel{
-		state:      StateMainMenu,
+		screen:     ScreenMainMenu,
 		agent:      agent,
 		menuItems:  defaultMenuItems,
 		menuCursor: 0,
+		chatInput:  chatInput,
+		askInput:   askInput,
+		spinner:    sp,
 	}
 }
 
 // ─── Tea.Model interface ────────────────────────────────────────────
 
 // Init implements tea.Model.Init.
-func (m *RootModel) Init() tea.Cmd { return nil }
+func (m *RootModel) Init() tea.Cmd {
+	return m.spinner.Tick
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 // Agent returns the AIAgent reference.
 func (m *RootModel) Agent() aiagent.AIAgent { return m.agent }
-
 
 // SelectedMenuItem returns the currently highlighted menu item.
 func (m *RootModel) SelectedMenuItem() *MenuItem {

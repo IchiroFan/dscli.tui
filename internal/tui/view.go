@@ -11,21 +11,21 @@ import (
 
 // View implements tea.Model.View.
 func (m *RootModel) View() string {
-	switch m.state {
-	case StateMainMenu:
+	switch m.screen {
+	case ScreenMainMenu:
 		return m.viewMainMenu()
-	case StateRunningCmd:
+	case ScreenRunningCmd:
 		return m.viewRunningCmd()
-	case StateShowOutput:
+	case ScreenShowOutput:
 		return m.viewShowOutput()
-	case StateChatting:
+	case ScreenChatting:
 		return m.viewChatting()
-	case StateAskUser:
+	case ScreenAskUser:
 		return m.viewAskUser()
-	case StateQuitting:
+	case ScreenQuitting:
 		return "Goodbye.\n"
 	default:
-		return "Unknown state.\n"
+		return "Unknown screen.\n"
 	}
 }
 
@@ -34,38 +34,30 @@ func (m *RootModel) View() string {
 func (m *RootModel) viewMainMenu() string {
 	var b strings.Builder
 
-	b.WriteString("╔══════════════════════════════════════════╗\n")
-	b.WriteString("║           dscli.tui — Main Menu          ║\n")
-	b.WriteString("╚══════════════════════════════════════════╝\n\n")
+	b.WriteString(LogoStyle.Render("dscli.tui"))
+	b.WriteString("\n\n")
 
 	for i, item := range m.menuItems {
-		cursor := "  "
-		style := ""
-		reset := ""
-
 		if i == m.menuCursor {
-			cursor = "▸ "
-			style = "\033[1;36m" // bold cyan
-			reset = "\033[0m"
-		}
-
-		line := fmt.Sprintf("%s%s%-2s %s\033[0m", style, cursor, item.Title, reset)
-		b.WriteString(line)
-		// Description on same line, dimmed.
-		if i == m.menuCursor {
-			b.WriteString(fmt.Sprintf(" \033[2m— %s\033[0m", item.Desc))
+			b.WriteString(MenuSelectedStyle.Render("▸ " + item.Title))
+			b.WriteString("  ")
+			b.WriteString(HelpStyle.Render("— " + item.Desc))
+		} else {
+			b.WriteString(MenuItemStyle.Render("  " + item.Title))
 		}
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n\033[2m↑↓ navigate • enter select • q quit • ctrl+c exit\033[0m\n")
+	b.WriteString("\n")
+	b.WriteString(HelpStyle.Render("↑↓ navigate • enter select • q quit • ctrl+c exit"))
+	b.WriteString("\n")
 	return b.String()
 }
 
 // ─── Running Command ─────────────────────────────────────────────────
 
 func (m *RootModel) viewRunningCmd() string {
-	return "⏳ Running command...\n"
+	return fmt.Sprintf("%s Running command...\n", m.spinner.View())
 }
 
 // ─── Show Output ─────────────────────────────────────────────────────
@@ -73,26 +65,23 @@ func (m *RootModel) viewRunningCmd() string {
 func (m *RootModel) viewShowOutput() string {
 	var b strings.Builder
 
-	title := "Output"
 	icon := "📄"
 	if !m.cmdSuccess {
 		icon = "⚠️ "
 	}
 
-	b.WriteString(fmt.Sprintf("╔══════════════════════════════════════════╗\n"))
-	b.WriteString(fmt.Sprintf("║  %s %s", icon, title))
-	// Right-align closing border
-	b.WriteString(strings.Repeat(" ", 36-len(title)))
-	b.WriteString("║\n")
-	b.WriteString(fmt.Sprintf("╚══════════════════════════════════════════╝\n\n"))
+	b.WriteString(HeaderStyle.Render(fmt.Sprintf("%s Output", icon)))
+	b.WriteString("\n")
 
 	if m.cmdOutput != "" {
 		b.WriteString(m.cmdOutput)
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n\033[2mPress any key to return to menu\033[0m\n")
-	return b.String()
+	b.WriteString("\n")
+	b.WriteString(HelpStyle.Render("Press any key to return to menu"))
+	b.WriteString("\n")
+	return AppStyle.Render(b.String())
 }
 
 // ─── Chatting ────────────────────────────────────────────────────────
@@ -100,72 +89,98 @@ func (m *RootModel) viewShowOutput() string {
 func (m *RootModel) viewChatting() string {
 	var b strings.Builder
 
-	b.WriteString("╔══════════════════════════════════════════╗\n")
-	b.WriteString("║  💬 Chat")
-	b.WriteString(strings.Repeat(" ", 32))
-	b.WriteString("║\n")
-	b.WriteString("╚══════════════════════════════════════════╝\n\n")
+	// ── Header ──
+	b.WriteString(HeaderStyle.Render("💬 Chat"))
+	b.WriteString("\n")
 
-	// Render chat history (scrollable region).
-	// We show as many lines as fit in the available height, minus 4 for
-	// borders, input line, and status.
-	maxLines := m.height - 6
+	// ── History area ──
+	// Calculate how many lines fit: height minus header, footer, input, status.
+	maxLines := m.Height - 8
 	if maxLines < 5 {
 		maxLines = 5
 	}
 
-	// Build message lines.
+	// Build message lines with proper styling.
 	var msgLines []string
 	for _, line := range m.chatHistory {
-		prefix := "  "
+		var prefix string
 		switch line.Role {
 		case "user":
-			prefix = "\033[1;33mYou:\033[0m "
+			prefix = ChatRoleUserStyle.Render("You:")
 		case "assistant":
-			prefix = "\033[1;32mAI:\033[0m  "
+			prefix = ChatRoleAssistantStyle.Render("AI:")
 		case "reasoning":
-			prefix = "\033[2;35m...\033[0m "
+			prefix = ThinkLineStyle.Render("...")
+		default:
+			prefix = ""
 		}
-		msgLines = append(msgLines, prefix+line.Content)
+		msgLines = append(msgLines, prefix+" "+line.Content)
 	}
 
 	// Show pending user input (not yet committed to history).
 	if m.chatPendingInput != "" && !m.chatLoading && !m.chatDone {
 		msgLines = append(msgLines,
-			fmt.Sprintf("\033[1;33mYou:\033[0m %s \033[2m(pending...)\033[0m", m.chatPendingInput))
+			fmt.Sprintf("%s %s %s",
+				ChatRoleUserStyle.Render("You:"),
+				m.chatPendingInput,
+				HelpStyle.Render("(pending...)")))
 	}
 
-	// Show last N lines.
-	if len(msgLines) > maxLines {
-		msgLines = msgLines[len(msgLines)-maxLines:]
+	// ── Scrolling ──
+	totalLines := len(msgLines)
+	if totalLines > maxLines {
+		m.chatScrollMax = totalLines - maxLines
+		// Clamp scroll.
+		if m.chatScroll > m.chatScrollMax {
+			m.chatScroll = m.chatScrollMax
+		}
+		// Show the window: from (totalLines - maxLines - scroll) to end.
+		start := totalLines - maxLines - m.chatScroll
+		if start < 0 {
+			start = 0
+		}
+		end := start + maxLines
+		if end > totalLines {
+			end = totalLines
+		}
+		msgLines = msgLines[start:end]
+
+		// Scroll indicator.
+		if m.chatScroll > 0 {
+			b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more lines above", m.chatScroll)))
+			b.WriteString("\n")
+		}
+	} else {
+		m.chatScrollMax = 0
+		m.chatScroll = 0
 	}
+
 	for _, l := range msgLines {
 		b.WriteString(l)
 		b.WriteString("\n")
 	}
 
-	// Status line.
+	// ── Status / Spinner ──
 	if m.chatLoading {
-		b.WriteString("\n\033[2m⏳ AI is thinking...\033[0m\n")
+		b.WriteString("\n")
+		b.WriteString(ChatLoadingStyle.Render(fmt.Sprintf("%s AI is thinking...", m.spinner.View())))
+		b.WriteString("\n")
 	} else if m.chatDone {
-		b.WriteString("\n\033[2m✅ Response complete. Type another message or press Esc for menu.\033[0m\n")
+		b.WriteString("\n")
+		b.WriteString(SpinnerDoneStyle.Render("✅ Response complete. Type another message or press Esc for menu."))
+		b.WriteString("\n")
 	}
 
-	// Input line.
-	inputStr := string(m.chatInput)
-	b.WriteString(fmt.Sprintf("\n\033[1;36m>\033[0m %s", inputStr))
-	// Cursor (blinking bar simulated with block).
-	if len(inputStr) == m.chatCursor {
-		b.WriteString("\033[5m█\033[0m")
-	} else {
-		b.WriteString("\033[0m") // reset
-	}
-
-	b.WriteString(fmt.Sprintf("  \033[2m(%d/%d)\033[0m", m.chatCursor, len(inputStr)))
+	// ── Input line ──
+	b.WriteString("\n")
+	b.WriteString(m.chatInput.View())
 	b.WriteString("\n")
 
-	b.WriteString("\033[2mEsc: menu • Enter: send\033[0m\n")
-	return b.String()
+	// ── Footer ──
+	b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • PgUp/PgDn: scroll"))
+	b.WriteString("\n")
+
+	return AppStyle.Render(b.String())
 }
 
 // ─── AskUser Modal ───────────────────────────────────────────────────
@@ -173,8 +188,7 @@ func (m *RootModel) viewChatting() string {
 func (m *RootModel) viewAskUser() string {
 	var b strings.Builder
 
-	// Dimmed background (overlay effect) — just draw a modal box.
-	width := m.width
+	width := m.Width
 	if width < 50 {
 		width = 50
 	}
@@ -210,7 +224,8 @@ func (m *RootModel) viewAskUser() string {
 
 	switch m.askSemantic {
 	case protocol.SemanticConfirm:
-		b.WriteString(fmt.Sprintf("│  \033[1;33m[ y / n ]\033[0m  %-*s│\n",
+		b.WriteString(fmt.Sprintf("│  %s  %-*s│\n",
+			ChatRoleUserStyle.Render("[ y / n ]"),
 			boxW-18, "(y = yes, n = no)"))
 
 	case protocol.SemanticChoice:
@@ -218,10 +233,10 @@ func (m *RootModel) viewAskUser() string {
 		for i, opt := range m.askOptions {
 			cursor := "  "
 			if i == m.askChoice {
-				cursor = "▸ "
+				cursor = MenuSelectedStyle.Render("▸")
 			}
-			line := fmt.Sprintf("│    %s%s", cursor, opt)
-			padding := boxW - 6 - len(cursor) - len(opt)
+			line := fmt.Sprintf("│    %s %s", cursor, opt)
+			padding := boxW - 8 - len(cursor) - len(opt)
 			if padding > 0 {
 				line += strings.Repeat(" ", padding)
 			}
@@ -230,17 +245,7 @@ func (m *RootModel) viewAskUser() string {
 		}
 
 	case protocol.SemanticInput:
-		inputStr := string(m.askInput)
-		b.WriteString(fmt.Sprintf("│  \033[1;36m>\033[0m %s", inputStr))
-		if len(inputStr) == m.askCursor {
-			b.WriteString("\033[5m█\033[0m")
-		}
-		// padding to box width
-		padding := boxW - 8 - len(inputStr)
-		if padding > 0 {
-			b.WriteString(strings.Repeat(" ", padding))
-		}
-		b.WriteString("│\n")
+		b.WriteString(fmt.Sprintf("│  %s│\n", m.askInput.View()))
 	}
 
 	// ── Bottom border ──
@@ -251,12 +256,13 @@ func (m *RootModel) viewAskUser() string {
 	// ── Help line ──
 	switch m.askSemantic {
 	case protocol.SemanticConfirm:
-		b.WriteString("\033[2mPress y or n to answer\033[0m\n")
+		b.WriteString(HelpStyle.Render("Press y or n to answer"))
 	case protocol.SemanticChoice:
-		b.WriteString("\033[2m↑↓ navigate • enter select\033[0m\n")
+		b.WriteString(HelpStyle.Render("↑↓ navigate • enter select"))
 	case protocol.SemanticInput:
-		b.WriteString("\033[2mType your answer • enter confirm • esc cancel\033[0m\n")
+		b.WriteString(HelpStyle.Render("Type your answer • enter confirm • esc cancel"))
 	}
+	b.WriteString("\n")
 
 	return b.String()
 }

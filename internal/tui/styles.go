@@ -175,6 +175,14 @@ var (
 	ChatRoleAssistantStyle = lipgloss.NewStyle().
 		Foreground(colorPrimary).
 		Bold(true)
+
+	SpinnerStyle = lipgloss.NewStyle().
+		Foreground(colorPrimary).
+		Bold(true)
+
+	SpinnerDoneStyle = lipgloss.NewStyle().
+		Foreground(colorGreen).
+		Bold(true)
 )
 
 // ─── Chat Bubble Styles ─────────────────────────────────────────────────────
