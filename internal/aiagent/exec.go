@@ -252,8 +252,9 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 	// condition (Go exec.Cmd.Wait is not safe for concurrent use) that can
 	// deadlock, freezing the TUI update loop.
 	go func() {
-		defer close(events)
 		defer close(done)
+		defer close(events)
+
 
 		// 1. Emit TypeReady immediately — the session is ready to accept input.
 		events <- &protocol.Message{Type: protocol.TypeReady}

@@ -431,11 +431,10 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Done {
-			m.chatLoading = false
-			m.chatDone = true
-			m.spinnerOn = false
-			return m, nil
+			return m.handleChatDone()
 		}
+
+
 		return m.handleChatEvent(msg.Message)
 
 	// ── Keyboard input ───────────────────────────────────────────
@@ -582,29 +581,8 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 		return m, m.waitForMoreChatEvents()
 
 	case protocol.TypeChatDone:
-		m.chatLoading = false
-		m.chatDone = true
-		m.spinnerOn = false
+		return m.handleChatDone()
 
-		// The dscli process has already exited naturally (stdin was closed
-		// and dscli finished processing). Mark session nil so the Enter
-		// handler doesn't try to Close a dead process.
-		m.chatSession = nil
-
-		// Interleaved chat (插入对话): if user queued a message while AI was
-		// responding, automatically start a new exchange so the correction
-		// reaches the AI without an extra Enter press from the user.
-		if m.chatPendingInput != "" {
-			m.chatPendingInput = ""
-			m.chatLoading = true
-			m.chatDone = false
-			m.spinnerOn = true
-			m.chatInput.Blur()
-			return m, cmdStartChat(m.agent, m.chatHistory)
-		}
-
-		focusCmd := m.chatInput.Focus()
-		return m, focusCmd
 
 	case protocol.TypeAskUser:
 		p, ok := msg.Payload.(*protocol.AskUserPayload)
@@ -629,25 +607,8 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 		return m, m.waitForMoreChatEvents()
 
 	case protocol.TypeGoodbye:
-		m.chatLoading = false
-		m.chatDone = true
-		m.spinnerOn = false
+		return m.handleChatDone()
 
-		// Same as TypeChatDone: process already exited.
-		m.chatSession = nil
-
-		// Interleaved chat: auto-send pending message.
-		if m.chatPendingInput != "" {
-			m.chatPendingInput = ""
-			m.chatLoading = true
-			m.chatDone = false
-			m.spinnerOn = true
-			m.chatInput.Blur()
-			return m, cmdStartChat(m.agent, m.chatHistory)
-		}
-
-		focusCmd := m.chatInput.Focus()
-		return m, focusCmd
 
 	default:
 		return m, m.waitForMoreChatEvents()
@@ -662,6 +623,35 @@ func (m *RootModel) appendToLastAssistant(content, reasoning string) {
 	}
 	last := &m.chatHistory[len(m.chatHistory)-1]
 	last.Content += content
+}
+
+// handleChatDone is called when the current chat exchange is complete
+// (via TypeChatDone, TypeGoodbye, or Events channel closed).
+// It sets the done state, handles interleaved pending input, and re-focuses
+// the chat input for the next exchange.
+func (m *RootModel) handleChatDone() (tea.Model, tea.Cmd) {
+	m.chatLoading = false
+	m.chatDone = true
+	m.spinnerOn = false
+	// The dscli process has already exited naturally (stdin was closed
+	// and dscli finished processing). Mark session nil so the Enter
+	// handler doesn't try to Close a dead process.
+	m.chatSession = nil
+
+	// Interleaved chat (插入对话): if user queued a message while AI was
+	// responding, automatically start a new exchange so the correction
+	// reaches the AI without an extra Enter press from the user.
+	if m.chatPendingInput != "" {
+		m.chatPendingInput = ""
+		m.chatLoading = true
+		m.chatDone = false
+		m.spinnerOn = true
+		m.chatInput.Blur()
+		return m, cmdStartChat(m.agent, m.chatHistory)
+	}
+
+	focusCmd := m.chatInput.Focus()
+	return m, focusCmd
 }
 
 // waitForMoreChatEvents returns a Cmd that waits for the next chat event
