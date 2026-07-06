@@ -89,10 +89,10 @@ func (e *ErrorInfo) Error() string { return e.Message }
 
 // Message is the top-level unit of the JSON-line protocol.
 type Message struct {
-	ID      string      `json:"id"`                // request ID, for correlation
-	Type    MessageType `json:"type"`               // message classifier
-	Payload Payload     `json:"payload"`            // type-asserted per MessageType
-	Error   *ErrorInfo  `json:"error,omitempty"`    // set for TypeError
+	ID      string      `json:"id"`              // request ID, for correlation
+	Type    MessageType `json:"type"`            // message classifier
+	Payload Payload     `json:"payload"`         // type-asserted per MessageType
+	Error   *ErrorInfo  `json:"error,omitempty"` // set for TypeError
 }
 
 // ─── Custom JSON for Message (dispatch Payload by Type) ────

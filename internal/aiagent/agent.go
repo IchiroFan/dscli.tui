@@ -169,7 +169,6 @@ type ChatEventMsg struct {
 	Err     error
 }
 
-
 // FlycheckResultMsg wraps the result of AIAgent.Flycheck.
 type FlycheckResultMsg struct {
 	Payload *protocol.CommandResultPayload

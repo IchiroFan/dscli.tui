@@ -703,7 +703,7 @@ func TestHandleChatChunk(t *testing.T) {
 
 	// First chunk: creates new assistant message.
 	chunk1 := &protocol.Message{
-		Type: protocol.TypeChatChunk,
+		Type:    protocol.TypeChatChunk,
 		Payload: &protocol.ChatChunkPayload{Content: "Hello ", Reasoning: "thinking..."},
 	}
 	_, cmd1 := handleEvent(m, chunk1)
@@ -723,7 +723,7 @@ func TestHandleChatChunk(t *testing.T) {
 
 	// Second chunk: appends to existing assistant.
 	chunk2 := &protocol.Message{
-		Type: protocol.TypeChatChunk,
+		Type:    protocol.TypeChatChunk,
 		Payload: &protocol.ChatChunkPayload{Content: "World!"},
 	}
 	_, cmd2 := handleEvent(m, chunk2)
@@ -1261,8 +1261,11 @@ func TestViewMainMenu(t *testing.T) {
 	m := model()
 	v := m.View()
 
-	if !strings.Contains(v, "dscli.tui") {
-		t.Error("view should contain logo 'dscli.tui'")
+	if !strings.Contains(v, "DSCLI") {
+		t.Error("view should contain logo 'DSCLI'")
+	}
+	if !strings.Contains(v, "DeepSeek CLI") {
+		t.Error("view should contain tagline 'DeepSeek CLI'")
 	}
 	if !strings.Contains(v, "Chat") {
 		t.Error("view should contain menu item 'Chat'")

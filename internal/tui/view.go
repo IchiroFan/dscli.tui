@@ -4,10 +4,68 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"gitcode.com/dscli/dscli.tui/internal/tui/protocol"
 )
 
+// ─── Logo ────────────────────────────────────────────────────────────────────
+
+// renderLogo returns the dscli ASCII art logo with gradient colors,
+// inspired by dscli.gitcode's design pattern.
+func renderLogo() string {
+	// ASCII art: "DSCLI" in 5-row block letters (7-wide each, 39 chars total)
+	logoLines := [5]string{
+		"███████  ███████ ███████ ██    ██████",
+		"██    ██ ██      ██      ██      ██   ",
+		"██    ██ ███████ ██      ██      ██   ",
+		"██    ██      ██ ██      ██      ██   ",
+		"███████  ███████ ███████ █████ ██████",
+	}
+
+	// Gradient colors for the rows (purple → blue → cyan → teal → green)
+	colors := []lipgloss.Color{
+		colorMauve,   // Row 1 - purple
+		colorPrimary, // Row 2 - blue
+		colorBlue,    // Row 3 - cyan
+		colorTeal,    // Row 4 - teal
+		colorGreen,   // Row 5 - green
+	}
+
+	frameStyle := lipgloss.NewStyle().
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(colorOverlay).
+		Padding(0, 1).
+		MarginBottom(1)
+
+	accentStyle := lipgloss.NewStyle().Foreground(colorMauve).Bold(true)
+	taglineStyle := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true)
+
+	var b strings.Builder
+
+	// Header line
+	b.WriteString(accentStyle.Render(" 🐋 DSCLI TUI "))
+	b.WriteString(strings.Repeat(" ", 16))
+	b.WriteString(accentStyle.Render(" ONLINE "))
+	b.WriteString("\n\n")
+
+	// ASCII art with gradient
+	for i, line := range logoLines {
+		b.WriteString(" ")
+		b.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(line))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+
+	// Tagline
+	b.WriteString(taglineStyle.Render(" > dscli — DeepSeek CLI"))
+
+	return frameStyle.Render(b.String()) + "\n"
+}
+
+
 // ─── View ────────────────────────────────────────────────────────────
+
 
 // View implements tea.Model.View.
 func (m *RootModel) View() string {
@@ -34,8 +92,8 @@ func (m *RootModel) View() string {
 func (m *RootModel) viewMainMenu() string {
 	var b strings.Builder
 
-	b.WriteString(LogoStyle.Render("dscli.tui"))
-	b.WriteString("\n\n")
+	b.WriteString(renderLogo())
+	b.WriteString("\n")
 
 	for i, item := range m.menuItems {
 		if i == m.menuCursor {

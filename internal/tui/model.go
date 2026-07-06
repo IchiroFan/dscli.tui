@@ -110,13 +110,13 @@ type RootModel struct {
 	spinnerOn bool // true when spinner should be rendered
 
 	// ── AskUser modal ─────────────────────────────────────────────
-	prevScreen  Screen                         // screen to restore after answering
+	prevScreen  Screen // screen to restore after answering
 	askQuestion string
 	askSemantic protocol.Semantic
 	askOptions  []string
-	askInput    textinput.Model                // for SemanticInput
-	askChoice   int                            // for SemanticChoice (0 = first option)
-	askDone     bool                           // true after user has answered
+	askInput    textinput.Model // for SemanticInput
+	askChoice   int             // for SemanticChoice (0 = first option)
+	askDone     bool            // true after user has answered
 	askResponse *protocol.AskUserResponsePayload
 
 	// ── Internal flags ────────────────────────────────────────────
@@ -150,7 +150,7 @@ func New(agent aiagent.AIAgent) *RootModel {
 	chatInput.Placeholder = "Type your message..."
 	chatInput.Focus()
 	chatInput.CharLimit = 0 // no limit
-	chatInput.Width = 40   // placeholder, resized on WindowSizeMsg
+	chatInput.Width = 40    // placeholder, resized on WindowSizeMsg
 
 	askInput := textinput.New()
 	askInput.Placeholder = "Type your answer..."

@@ -373,6 +373,37 @@ func resolveDSCLIPath(hint string) string {
 
 AIAgent 的唯一外部依赖是 `os/exec` — **不导入任何 dscli 包**。
 
+### 6.4 Raw Exec 回退方案（当前阶段使用）
+
+当前 `execAgent` 所有方法都使用 `--json-line` 标志与 dscli 通信。但 dscli master 分支尚不支持此标志（将在 Phase 4 实现）。为了让所有非交互菜单项立即可用，添加 Raw Exec 回退：
+
+```go
+// execDSRaw 直接执行 dscli <args> 并返回原始文本输出。
+// 不依赖 --json-line 标志，适用于所有非交互命令。
+func (a *execAgent) execDSRaw(ctx context.Context, args ...string) (*protocol.CommandResultPayload, error) {
+    cmd := exec.CommandContext(ctx, a.dscliPath, args...)
+    out, err := cmd.CombinedOutput()
+    output := strings.TrimSpace(string(out))
+    if err != nil {
+        return &protocol.CommandResultPayload{
+            Success: false,
+            Data:    output,
+        }, fmt.Errorf("dscli %v: %w\n%s", args, err, output)
+    }
+    return &protocol.CommandResultPayload{
+        Success: true,
+        Data:    output,
+    }, nil
+}
+```
+
+**策略**：
+1. 所有非交互命令（Balance, Models, Version 等）直接用 `execDSRaw` 替换 `execDS`，不再使用 `--json-line`
+2. `execDS()`（JSON-line 路径）保留但不调用，等待 Phase 4 启用
+3. ChatSession 保持 JSON-line 路径不变，待 Phase 4 dscli 实现 `--json-line` 后再联调
+
+**优点**：零架构改动，所有菜单项立即可用，无需等待 dscli 的 `--json-line` 模式。
+
 ## 7. Chat JSON-line 协议（dscli.tui 视角）
 
 ### 7.1 为什么需要 JSON-line 协议
@@ -739,34 +770,54 @@ func (m Model) fetchBalance() tea.Cmd {
 
 ## 10. 实施阶段
 
-### 10.1 Phase 1: 基础设施
+### 10.1 Phase 1: 基础设施 ✓
 - [x] 初始化 `dscli.tui` go.mod + 骨架
 - [x] 定义 `tui/protocol` 协议类型（Message, Payload, 所有负载类型）
 - [x] 实现 `pkg/jsonline` JSON-line 编解码器
 - [x] 实现 `aiagent.AIAgent` 接口定义（使用 `protocol.*Payload` 类型返回）
-- [x] 实现 `aiagent.execAgent` 非交互命令 + ChatSession
+- [x] 实现 `aiagent.execAgent` 非交互命令 + ChatSession（使用 `--json-line` 协议）
 - [x] 实现 `aiagent.resolveDSCLIPath`（dscli version 验证）
-- [ ] 移植 TUI 核心框架（Model + Init + Update + View 骨架）
+- [x] 移植 TUI 核心框架（Model + Init + Update + View + 6 屏幕路由）
+- [x] Screen 枚举 / textinput / spinner / 滚动支持
+- [x] 单元测试 30 个，全部通过
+- [x] Logo（渐变 ASCII art + 双线边框，与 dscli.gitcode 一致）
+- ⚠️ **注意**：当前所有命令使用 `--json-line` 标志，但 dscli master 分支尚未实现。
 
-### 10.2 Phase 2: 非交互式屏幕
-- [ ] 移植 Dashboard 屏幕
-- [ ] 移植 Balance 屏幕（通过 agent.Balance）
-- [ ] 移植 Models 屏幕（通过 agent.Models）
-- [ ] 移植 History 屏幕（通过 agent.History）
-- [ ] 移植 Skills 屏幕（通过 agent.Skill）
-- [ ] 移植 Prompt 屏幕（通过 agent.Prompt）
+### 10.2 Phase 2: 显示 dscli 原始输出（当前阶段）
+**目标**：在不依赖 `--json-line` 的前提下，让 TUI 各菜单项能调用 `dscli <subcmd>` 并展示原始输出。
+**方案**：在 `execAgent` 中添加 `execDSRaw()` 回退方法，直接执行 `dscli <args>` 捕获 stdout/stderr。
 
-### 10.3 Phase 3: 交互式对话 + ask_user
-- [ ] 实现 `aiagent.ChatSession`（JSON-line 读写）
-- [ ] 移植 Chat 屏幕（通过 ChatSession）
-- [ ] 实现 AskUser 模态框（含三种语义：回答/空回复/取消）
-- [ ] 注意：依赖 dscli 的 `chat --json` 模式实现
+- [ ] 添加 `execDSRaw(ctx, args...)` 方法，返回 `*CommandResultPayload`
+- [ ] 修改 `Balance()` / `Models()` / `Version()` / `Flycheck()` / `FIM()` 使用 raw fallback
+- [ ] 修改所有子命令（History/Skill/Prompt/Memory/Project/Role/Tool/Mail/Service）使用 raw fallback
+- [ ] 更新 `formatCommandResult()` 适配原始文本输出
+- [ ] 验证所有非交互菜单项（1-13）可正常显示 dscli 输出
+- [ ] 错误处理：dscli 未安装、命令执行失败
+- [ ] 更新测试覆盖 raw fallback 路径
 
-### 10.4 Phase 4: 完善
-- [ ] 移植剩余屏幕（Project/Role/Tool/Mail/Service/Flycheck）
-- [ ] 错误处理（dscli 未安装、版本不兼容等）
-- [ ] 测试
+### 10.3 Phase 3: 视觉完善（可与 Phase 2 并行）
+- [ ] Status Bar（底部显示版本 / 项目路径 / 模型 / 屏幕名）
+- [ ] Chat 气泡（UserBubbleBase / AssistantBubbleBase 边框）
+- [ ] Chat 输入框蓝色边框
+- [ ] AppStyle.Width() 全屏宽度对齐
+- [ ] AskUser 模态框 lipgloss 美化（替代 ASCII 手绘框）
+- [ ] 帮助栏完善
 
+### 10.4 Phase 4: 交互式对话（依赖 dscli --json-line）
+**注意**：以下任务依赖 dscli 项目的 `feature/chat-json-mode` 分支实现 `--json-line` 模式。
+对 dscli `--json` 的修改将在此阶段进行。AskUser 也在此阶段启用。
+
+- [ ] dscli 项目：实现 `--json-line` 全局标志
+- [ ] dscli 项目：实现 `chat --json-line` 交互模式（含 ask_user 支持）
+- [ ] 启用 `aiagent.ChatSession`（JSON-line over stdio 读写循环）
+- [ ] 启用 AskUser 模态框（三种语义：Confirm / Choice / Input）
+- [ ] Chat 屏幕完整联调（流式增量 / replaceLast / 事件处理）
+
+### 10.5 Phase 5: 剩余屏幕 + 完善
+- [ ] 移植剩余屏幕（Project / Role / Tool / Mail / Service / Flycheck 详情视图）
+- [ ] 错误处理完善（版本兼容性检测、友好提示）
+- [ ] 集成测试
+- [ ] 性能优化
 ## 11. 边界情况
 
 | 场景 | 处理方式 |

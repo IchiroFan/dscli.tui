@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"gitcode.com/dscli/dscli.tui/internal/tui/protocol"
@@ -31,97 +32,121 @@ func NewExecAgent(dscliPath string) (AIAgent, error) {
 	return &execAgent{dscliPath: resolved}, nil
 }
 
-// ── Non-interactive commands ────────────────────────────────
+// ── Non-interactive commands (raw exec, no --json-line) ──
 
 func (a *execAgent) Balance(ctx context.Context, format string) (*protocol.CommandResultPayload, error) {
-	args := []string{"--json-line", "balance"}
+	args := []string{"balance"}
 	if format != "" {
 		args = append(args, "--format", format)
 	}
-	return a.execDS(ctx, args...)
+	return a.execDSRaw(ctx, args...)
 }
 
 func (a *execAgent) Models(ctx context.Context, format string, showPrice bool) (*protocol.CommandResultPayload, error) {
-	args := []string{"--json-line", "models"}
+	args := []string{"models"}
 	if format != "" {
 		args = append(args, "--format", format)
 	}
 	if showPrice {
 		args = append(args, "--price")
 	}
-	return a.execDS(ctx, args...)
+	return a.execDSRaw(ctx, args...)
 }
 
 func (a *execAgent) Version(ctx context.Context) (*protocol.CommandResultPayload, error) {
-	return a.execDS(ctx, "--json-line", "version")
+	return a.execDSRaw(ctx, "version")
 }
 
 func (a *execAgent) Flycheck(ctx context.Context, path string, emacs bool) (*protocol.CommandResultPayload, error) {
-	args := []string{"--json-line", "flycheck"}
+	args := []string{"flycheck"}
 	if emacs {
 		args = append(args, "--emacs")
 	}
 	args = append(args, path)
-	return a.execDS(ctx, args...)
+	return a.execDSRaw(ctx, args...)
 }
 
 func (a *execAgent) FIM(ctx context.Context, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "fim"}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"fim"}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
 // ── Subcommand groups ───────────────────────────────────────
 
 func (a *execAgent) History(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "history", subcmd}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"history", subcmd}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
 func (a *execAgent) Skill(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "skill", subcmd}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"skill", subcmd}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
 func (a *execAgent) Prompt(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "prompt", subcmd}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"prompt", subcmd}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
 func (a *execAgent) Memory(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "memory", subcmd}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"memory", subcmd}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
 func (a *execAgent) Project(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "project", subcmd}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"project", subcmd}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
 func (a *execAgent) Role(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "role", subcmd}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"role", subcmd}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
 func (a *execAgent) Tool(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "tool", subcmd}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"tool", subcmd}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
 func (a *execAgent) Mail(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "mail", subcmd}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"mail", subcmd}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
 func (a *execAgent) Service(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
-	cmdArgs := append([]string{"--json-line", "service", subcmd}, args...)
-	return a.execDS(ctx, cmdArgs...)
+	cmdArgs := append([]string{"service", subcmd}, args...)
+	return a.execDSRaw(ctx, cmdArgs...)
 }
 
-// ── execDS: generic non-interactive execution ───────────────
+// ── execDSRaw: raw exec (no --json-line) ────────────────────
+
+// execDSRaw runs dscli with the given args directly (no --json-line mode),
+// captures stdout+stderr, and wraps the result in a CommandResultPayload.
+// Used by all non-interactive commands until dscli implements --json-line.
+func (a *execAgent) execDSRaw(ctx context.Context, args ...string) (*protocol.CommandResultPayload, error) {
+	cmd := exec.CommandContext(ctx, a.dscliPath, args...)
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		return &protocol.CommandResultPayload{
+			Success: false,
+			Data:    output,
+		}, fmt.Errorf("dscli %v: %w\n%s", args, err, output)
+	}
+	return &protocol.CommandResultPayload{
+		Success: true,
+		Data:    output,
+	}, nil
+}
+
+// ── execDS: JSON-line execution (reserved for Phase 4) ──────
 
 // execDS runs dscli with the given args in JSON-line mode and returns
 // the first CommandResultPayload received.  It consumes and discards
 // any StatusPayload or Ready messages before the result.
+//
+// NOTE: Currently unused by non-interactive commands (they use execDSRaw).
+// Kept for Phase 4 when dscli implements --json-line mode.
 func (a *execAgent) execDS(ctx context.Context, args ...string) (*protocol.CommandResultPayload, error) {
 	cmd := exec.CommandContext(ctx, a.dscliPath, args...)
 

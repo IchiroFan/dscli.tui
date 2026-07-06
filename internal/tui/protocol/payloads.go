@@ -4,14 +4,14 @@ package protocol
 
 // ChatRequestPayload is sent by the TUI to start / continue a chat.
 type ChatRequestPayload struct {
-	Model    string `json:"model"`              // model name, e.g. "deepseek-chat"
-	Messages []ChatMessage `json:"messages"`    // full message history
-	Stream   bool   `json:"stream"`             // enable streaming
+	Model    string        `json:"model"`    // model name, e.g. "deepseek-chat"
+	Messages []ChatMessage `json:"messages"` // full message history
+	Stream   bool          `json:"stream"`   // enable streaming
 }
 
 // ChatMessage is a single entry in the message history (OpenAI-compatible).
 type ChatMessage struct {
-	Role    string `json:"role"`                // "user" | "assistant" | "system"
+	Role    string `json:"role"` // "user" | "assistant" | "system"
 	Content string `json:"content"`
 }
 
@@ -71,9 +71,10 @@ func (AskUserPayload) payloadMarker() {}
 
 // AskUserResponsePayload carries the user's answer back to dscli.
 // At least one of Value / Choice is set depending on Semantic:
-//   confirm → Value is "yes" | "no"
-//   choice  → Choice is the selected index
-//   input   → Value is the free-text input
+//
+//	confirm → Value is "yes" | "no"
+//	choice  → Choice is the selected index
+//	input   → Value is the free-text input
 type AskUserResponsePayload struct {
 	Value   string `json:"value,omitempty"`
 	Choice  int    `json:"choice,omitempty"`
@@ -86,7 +87,7 @@ func (AskUserResponsePayload) payloadMarker() {}
 
 // CommandPayload executes a non-chat subcommand.
 type CommandPayload struct {
-	Name string   `json:"name"`          // e.g. "models", "balance", "history"
+	Name string   `json:"name"` // e.g. "models", "balance", "history"
 	Args []string `json:"args,omitempty"`
 }
 
@@ -106,7 +107,7 @@ func (CommandResultPayload) payloadMarker() {}
 
 // StatusPayload is a spontaneous status update from dscli.
 type StatusPayload struct {
-	Status  string `json:"status"`            // "loading" | "connecting" | "processing"
+	Status  string `json:"status"` // "loading" | "connecting" | "processing"
 	Message string `json:"message,omitempty"`
 }
 

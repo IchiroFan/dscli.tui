@@ -35,29 +35,29 @@ var (
 var (
 	// AppStyle is the outer container for all non-chat screens.
 	AppStyle = lipgloss.NewStyle().
-		Foreground(colorText).
-		Padding(1, 2)
+			Foreground(colorText).
+			Padding(1, 2)
 
 	// HeaderStyle for screen titles.
 	HeaderStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(colorPrimary).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		BorderForeground(colorOverlay).
-		PaddingBottom(1).
-		MarginBottom(1)
+			Bold(true).
+			Foreground(colorPrimary).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderBottom(true).
+			BorderForeground(colorOverlay).
+			PaddingBottom(1).
+			MarginBottom(1)
 
 	// HelpStyle for keyboard hint lines.
 	HelpStyle = lipgloss.NewStyle().
-		Foreground(colorSubtext).
-		MarginTop(1)
+			Foreground(colorSubtext).
+			MarginTop(1)
 
 	// ErrorStyle for error messages.
 	ErrorStyle = lipgloss.NewStyle().
-		Foreground(colorRed).
-		Bold(true).
-		Padding(0, 1)
+			Foreground(colorRed).
+			Bold(true).
+			Padding(0, 1)
 )
 
 // ─── Dashboard Styles ───────────────────────────────────────────────────────
@@ -65,29 +65,29 @@ var (
 var (
 	// MenuItemStyle for unselected menu items.
 	MenuItemStyle = lipgloss.NewStyle().
-		Foreground(colorText).
-		PaddingLeft(2)
+			Foreground(colorText).
+			PaddingLeft(2)
 
 	// MenuSelectedStyle for the currently highlighted menu item.
 	MenuSelectedStyle = lipgloss.NewStyle().
-		Foreground(colorPrimary).
-		Bold(true).
-		PaddingLeft(1)
+				Foreground(colorPrimary).
+				Bold(true).
+				PaddingLeft(1)
 
 	// TitleStyle for section titles within a screen.
 	TitleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(colorMauve).
-		MarginBottom(1)
+			Bold(true).
+			Foreground(colorMauve).
+			MarginBottom(1)
 
 	// LogoStyle for the dscli ASCII art frame.
 	LogoStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(colorPrimary).
-		Border(lipgloss.DoubleBorder()).
-		BorderForeground(colorOverlay).
-		Padding(0, 2).
-		MarginBottom(1)
+			Bold(true).
+			Foreground(colorPrimary).
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(colorOverlay).
+			Padding(0, 2).
+			MarginBottom(1)
 )
 
 // ─── List Styles ────────────────────────────────────────────────────────────
@@ -95,31 +95,31 @@ var (
 var (
 	// ListItemStyle for unselected list items.
 	ListItemStyle = lipgloss.NewStyle().
-		Foreground(colorText).
-		PaddingLeft(2)
+			Foreground(colorText).
+			PaddingLeft(2)
 
 	// ListSelectedStyle for the currently selected list item.
 	ListSelectedStyle = lipgloss.NewStyle().
-		Foreground(colorPrimary).
-		Bold(true).
-		PaddingLeft(1)
+				Foreground(colorPrimary).
+				Bold(true).
+				PaddingLeft(1)
 
 	// TimestampStyle for metadata (dates, IDs, counts).
 	TimestampStyle = lipgloss.NewStyle().
-		Foreground(colorSubtext).
-		Italic(true)
+			Foreground(colorSubtext).
+			Italic(true)
 
 	// ContentPreviewStyle for truncated content previews.
 	ContentPreviewStyle = lipgloss.NewStyle().
-		Foreground(colorSubtext).
-		PaddingLeft(4)
+				Foreground(colorSubtext).
+				PaddingLeft(4)
 
 	// NoDataStyle for empty-state messages.
 	NoDataStyle = lipgloss.NewStyle().
-		Foreground(colorSubtext).
-		Italic(true).
-		PaddingLeft(2).
-		MarginTop(1)
+			Foreground(colorSubtext).
+			Italic(true).
+			PaddingLeft(2).
+			MarginTop(1)
 )
 
 // ─── Detail Styles ──────────────────────────────────────────────────────────
@@ -127,26 +127,26 @@ var (
 var (
 	// SectionHeadingStyle for detail section headers.
 	SectionHeadingStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(colorMauve).
-		MarginTop(1).
-		MarginBottom(1)
+				Bold(true).
+				Foreground(colorMauve).
+				MarginTop(1).
+				MarginBottom(1)
 
 	// DetailLabelStyle for field labels (right-aligned, fixed width).
 	DetailLabelStyle = lipgloss.NewStyle().
-		Foreground(colorSubtext).
-		Width(14).
-		Align(lipgloss.Right).
-		PaddingRight(1)
+				Foreground(colorSubtext).
+				Width(14).
+				Align(lipgloss.Right).
+				PaddingRight(1)
 
 	// DetailValueStyle for field values.
 	DetailValueStyle = lipgloss.NewStyle().
-		Foreground(colorText)
+				Foreground(colorText)
 
 	// DetailContentStyle for multi-line content sections.
 	DetailContentStyle = lipgloss.NewStyle().
-		Foreground(colorText).
-		PaddingLeft(2)
+				Foreground(colorText).
+				PaddingLeft(2)
 )
 
 // ─── Chat Styles ────────────────────────────────────────────────────────────
@@ -154,35 +154,35 @@ var (
 var (
 	// ChatInputStyle for the chat input field border.
 	ChatInputStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(colorPrimary).
-		Foreground(colorText).
-		Padding(0, 1).
-		MarginTop(1)
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(colorPrimary).
+			Foreground(colorText).
+			Padding(0, 1).
+			MarginTop(1)
 
 	// ChatLoadingStyle for the "AI is thinking..." indicator.
 	ChatLoadingStyle = lipgloss.NewStyle().
-		Foreground(colorSubtext).
-		Italic(true).
-		PaddingLeft(2)
+				Foreground(colorSubtext).
+				Italic(true).
+				PaddingLeft(2)
 
 	// ChatRoleUserStyle for "You:" role labels.
 	ChatRoleUserStyle = lipgloss.NewStyle().
-		Foreground(colorGreen).
-		Bold(true)
+				Foreground(colorGreen).
+				Bold(true)
 
 	// ChatRoleAssistantStyle for "AI:" role labels.
 	ChatRoleAssistantStyle = lipgloss.NewStyle().
-		Foreground(colorPrimary).
-		Bold(true)
+				Foreground(colorPrimary).
+				Bold(true)
 
 	SpinnerStyle = lipgloss.NewStyle().
-		Foreground(colorPrimary).
-		Bold(true)
+			Foreground(colorPrimary).
+			Bold(true)
 
 	SpinnerDoneStyle = lipgloss.NewStyle().
-		Foreground(colorGreen).
-		Bold(true)
+				Foreground(colorGreen).
+				Bold(true)
 )
 
 // ─── Chat Bubble Styles ─────────────────────────────────────────────────────
@@ -190,63 +190,63 @@ var (
 var (
 	// UserBubbleBase for user message bubbles. Call .MaxWidth(w) at render time.
 	UserBubbleBase = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorGreen).
-		Padding(0, 1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorGreen).
+			Padding(0, 1)
 
 	// AssistantBubbleBase for assistant message bubbles.
 	AssistantBubbleBase = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPrimary).
-		Padding(0, 1)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorPrimary).
+				Padding(0, 1)
 
 	// ThinkBubbleBase for reasoning/thinking bubbles (mauve border).
 	ThinkBubbleBase = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorMauve).
-		Padding(0, 1)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorMauve).
+			Padding(0, 1)
 
 	// ThinkLineStyle for reasoning/thinking content (italic, dim).
 	ThinkLineStyle = lipgloss.NewStyle().
-		Foreground(colorSubtext).
-		Italic(true)
+			Foreground(colorSubtext).
+			Italic(true)
 
 	// ToolLineStyle for tool-call result lines (yellow, italic).
 	ToolLineStyle = lipgloss.NewStyle().
-		Foreground(colorYellow).
-		Italic(true)
+			Foreground(colorYellow).
+			Italic(true)
 
 	// TruncationWarnBubble for truncation warnings (red, bold, centered).
 	TruncationWarnBubble = lipgloss.NewStyle().
-		Foreground(colorRed).
-		Bold(true)
+				Foreground(colorRed).
+				Bold(true)
 
 	// ── Unified bubble internal styles ─────────────────────────────────
 
 	// AssistantBodyStyle: white/bold for assistant's final answer.
 	AssistantBodyStyle = lipgloss.NewStyle().
-		Foreground(colorText).
-		Bold(true)
+				Foreground(colorText).
+				Bold(true)
 
 	// ThinkBodyStyle: italic dim for thinking content inside unified bubble.
 	ThinkBodyStyle = lipgloss.NewStyle().
-		Foreground(colorSubtext).
-		Italic(true)
+			Foreground(colorSubtext).
+			Italic(true)
 
 	// ToolBodyStyle: yellow/italic for tool results inside unified bubble.
 	ToolBodyStyle = lipgloss.NewStyle().
-		Foreground(colorYellow).
-		Italic(true)
+			Foreground(colorYellow).
+			Italic(true)
 
 	// StateBodyStyle: subtle for session-state lines.
 	StateBodyStyle = lipgloss.NewStyle().
-		Foreground(colorSubtext).
-		Italic(true)
+			Foreground(colorSubtext).
+			Italic(true)
 
 	// TruncationBodyStyle: red/bold for truncation warning inside bubble.
 	TruncationBodyStyle = lipgloss.NewStyle().
-		Foreground(colorRed).
-		Bold(true)
+				Foreground(colorRed).
+				Bold(true)
 )
 
 // BubbleMaxPercent is the maximum bubble width as a percentage of available
@@ -258,13 +258,13 @@ const BubbleMaxPercent = 72
 var (
 	// BadgeSuccessStyle for success badges.
 	BadgeSuccessStyle = lipgloss.NewStyle().
-		Foreground(colorGreen).
-		Bold(true)
+				Foreground(colorGreen).
+				Bold(true)
 
 	// BadgeWarnStyle for warning badges.
 	BadgeWarnStyle = lipgloss.NewStyle().
-		Foreground(colorYellow).
-		Bold(true)
+			Foreground(colorYellow).
+			Bold(true)
 )
 
 // ─── Status Bar Styles ──────────────────────────────────────────────────────
@@ -272,28 +272,28 @@ var (
 var (
 	// StatusBarBg is the full-width bar background.
 	StatusBarBg = lipgloss.NewStyle().
-		Background(colorSurface)
+			Background(colorSurface)
 
 	// StatusVersion is the version badge (mauve bg, dark text).
 	StatusVersion = lipgloss.NewStyle().
-		Background(colorMauve).
-		Foreground(colorBase).
-		Bold(true).
-		Padding(0, 1)
+			Background(colorMauve).
+			Foreground(colorBase).
+			Bold(true).
+			Padding(0, 1)
 
 	// StatusLabel for labels like 📁 project / 🤖 model.
 	StatusLabel = lipgloss.NewStyle().
-		Foreground(colorSubtext)
+			Foreground(colorSubtext)
 
 	// StatusSep is the separator between sections.
 	StatusSep = lipgloss.NewStyle().
-		Foreground(colorOverlay)
+			Foreground(colorOverlay)
 
 	// StatusScreen is the current screen name (primary accent).
 	StatusScreen = lipgloss.NewStyle().
-		Foreground(colorPrimary).
-		Bold(true).
-		Padding(0, 1)
+			Foreground(colorPrimary).
+			Bold(true).
+			Padding(0, 1)
 )
 
 // ─── Bubble Rendering ───────────────────────────────────────────────────────
