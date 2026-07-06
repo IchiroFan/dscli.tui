@@ -308,7 +308,7 @@ func (m *RootModel) historyListPayload(p *protocol.CommandResultPayload) bool {
 		return false
 	}
 	m.historyItems = items
-	m.historyCursor = 0
+	m.historyCursor = len(items) - 1 // select newest (last) item
 	m.screen = ScreenHistoryList
 	return true
 }

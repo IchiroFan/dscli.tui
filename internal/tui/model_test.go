@@ -894,8 +894,8 @@ func TestHistoryListPayload(t *testing.T) {
 		if len(m.historyItems) != 2 {
 			t.Errorf("got %d items, want 2", len(m.historyItems))
 		}
-		if m.historyCursor != 0 {
-			t.Errorf("cursor = %d, want 0 (first item selected)", m.historyCursor)
+		if m.historyCursor != len(m.historyItems)-1 {
+			t.Errorf("cursor = %d, want %d (newest item selected)", m.historyCursor, len(m.historyItems)-1)
 		}
 	})
 
