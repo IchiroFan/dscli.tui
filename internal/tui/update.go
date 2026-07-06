@@ -586,11 +586,10 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 		m.chatDone = true
 		m.spinnerOn = false
 
-		// Close the session process.
-		if m.chatSession != nil {
-			m.chatSession.Close() //nolint:errcheck
-			m.chatSession = nil
-		}
+		// The dscli process has already exited naturally (stdin was closed
+		// and dscli finished processing). Mark session nil so the Enter
+		// handler doesn't try to Close a dead process.
+		m.chatSession = nil
 
 		// Interleaved chat (插入对话): if user queued a message while AI was
 		// responding, automatically start a new exchange so the correction
@@ -634,10 +633,8 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 		m.chatDone = true
 		m.spinnerOn = false
 
-		if m.chatSession != nil {
-			m.chatSession.Close() //nolint:errcheck
-			m.chatSession = nil
-		}
+		// Same as TypeChatDone: process already exited.
+		m.chatSession = nil
 
 		// Interleaved chat: auto-send pending message.
 		if m.chatPendingInput != "" {

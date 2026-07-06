@@ -2046,7 +2046,7 @@ func TestViewChatting(t *testing.T) {
 		}
 	})
 
-	t.Run("done shows response complete", func(t *testing.T) {
+	t.Run("done shows ready indicator", func(t *testing.T) {
 		m := model()
 		m.screen = ScreenChatting
 		m.chatLoading = false
@@ -2057,8 +2057,8 @@ func TestViewChatting(t *testing.T) {
 		}
 		v := m.View()
 
-		if !strings.Contains(v, "Response complete") {
-			t.Error("view should show 'Response complete' when done")
+		if !strings.Contains(v, "Ready") {
+			t.Error("view should show 'Ready' indicator when done")
 		}
 	})
 

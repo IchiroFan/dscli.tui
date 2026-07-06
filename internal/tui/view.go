@@ -453,7 +453,7 @@ func (m *RootModel) viewChatting() string {
 		b.WriteString("\n")
 	} else if m.chatDone {
 		b.WriteString("\n")
-		b.WriteString(SpinnerDoneStyle.Render("✅ Response complete"))
+		b.WriteString(SpinnerDoneStyle.Render("💬 Ready"))
 		b.WriteString("\n")
 	}
 
