@@ -935,6 +935,325 @@ func TestHistoryListNonKeyMsg(t *testing.T) {
 	}
 }
 
+// ─── Update: Skill List ──────────────────────────────────────────
+
+func TestParseSkillList(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantCount int
+		firstName string
+	}{
+		{
+			name: "typical output",
+			input: `名称                              范围         自动注入
+api-design-principles           global     -
+architecture-decision-records   global     -
+dscli                           built-in   是`,
+			wantCount: 3,
+			firstName: "api-design-principles",
+		},
+		{
+			name:      "empty input",
+			input:     "",
+			wantCount: 0,
+		},
+		{
+			name: "header only",
+			input: `名称                              范围         自动注入`,
+			wantCount: 0,
+		},
+		{
+			name: "single skill with auto-inject",
+			input: `名称    范围     自动注入
+my-skill  local    是`,
+			wantCount: 1,
+			firstName: "my-skill",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := parseSkillList(tt.input)
+			if len(items) != tt.wantCount {
+				t.Fatalf("got %d items, want %d", len(items), tt.wantCount)
+			}
+			if tt.wantCount > 0 && items[0].Name != tt.firstName {
+				t.Errorf("items[0].Name = %q, want %q", items[0].Name, tt.firstName)
+			}
+		})
+	}
+}
+
+func TestSplitByTwoOrMoreSpaces(t *testing.T) {
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{"hello", []string{"hello"}},
+		{"hello  world", []string{"hello", "world"}},
+		{"a   b    c", []string{"a", "b", "c"}},
+		{"name       scope     auto", []string{"name", "scope", "auto"}},
+		{"single-spaces keep together", []string{"single-spaces keep together"}}, // single spaces are kept as one field
+		{"", []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := splitByTwoOrMoreSpaces(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v (len=%d), want %v (len=%d)", got, len(got), tt.want, len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("got[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSkillListNavigation(t *testing.T) {
+	t.Run("down moves cursor", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenSkillList
+		m.skillItems = []SkillItem{
+			{Name: "skill-a", Scope: "global"},
+			{Name: "skill-b", Scope: "local"},
+			{Name: "skill-c", Scope: "built-in"},
+		}
+		m.skillCursor = 0
+
+		// Down
+		m = update(m, tea.KeyMsg{Type: tea.KeyDown})
+		if m.skillCursor != 1 {
+			t.Errorf("cursor = %d, want 1 after down", m.skillCursor)
+		}
+
+		// j
+		m = update(m, keyJ)
+		if m.skillCursor != 2 {
+			t.Errorf("cursor = %d, want 2 after j", m.skillCursor)
+		}
+
+		// Down clamped at end
+		m = update(m, tea.KeyMsg{Type: tea.KeyDown})
+		if m.skillCursor != 2 {
+			t.Errorf("cursor should stay at 2 (end of list)")
+		}
+	})
+
+	t.Run("up moves cursor", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenSkillList
+		m.skillItems = []SkillItem{
+			{Name: "skill-a", Scope: "global"},
+			{Name: "skill-b", Scope: "local"},
+		}
+		m.skillCursor = 1
+
+		// Up
+		m = update(m, tea.KeyMsg{Type: tea.KeyUp})
+		if m.skillCursor != 0 {
+			t.Errorf("cursor = %d, want 0 after up", m.skillCursor)
+		}
+
+		// Up clamped at 0
+		m = update(m, tea.KeyMsg{Type: tea.KeyUp})
+		if m.skillCursor != 0 {
+			t.Errorf("cursor should stay at 0")
+		}
+	})
+
+	t.Run("k moves up", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenSkillList
+		m.skillItems = []SkillItem{
+			{Name: "skill-a", Scope: "global"},
+			{Name: "skill-b", Scope: "local"},
+		}
+		m.skillCursor = 1
+
+		m = update(m, keyK)
+		if m.skillCursor != 0 {
+			t.Errorf("cursor = %d, want 0 after k", m.skillCursor)
+		}
+	})
+}
+
+func TestSkillListSelect(t *testing.T) {
+	t.Run("enter dispatches show command", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenSkillList
+		m.skillItems = []SkillItem{
+			{Name: "api-design", Scope: "global"},
+			{Name: "architecture-patterns", Scope: "global"},
+		}
+		m.skillCursor = 1
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.screen != ScreenRunningCmd {
+			t.Errorf("screen = %d, want ScreenRunningCmd", m.screen)
+		}
+		if cmd == nil {
+			t.Fatal("expected non-nil cmd")
+		}
+	})
+
+	t.Run("space also selects", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenSkillList
+		m.skillItems = []SkillItem{
+			{Name: "my-skill", Scope: "local"},
+		}
+		m.skillCursor = 0
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeySpace})
+		if m.screen != ScreenRunningCmd {
+			t.Errorf("screen = %d, want ScreenRunningCmd", m.screen)
+		}
+		if cmd == nil {
+			t.Fatal("expected non-nil cmd")
+		}
+	})
+
+	t.Run("enter with invalid cursor does nothing", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenSkillList
+		m.skillItems = []SkillItem{
+			{Name: "skill-a", Scope: "global"},
+		}
+		m.skillCursor = -1
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.screen != ScreenSkillList {
+			t.Errorf("screen should stay ScreenSkillList, got %d", m.screen)
+		}
+		if cmd != nil {
+			t.Error("expected nil cmd for invalid cursor")
+		}
+	})
+}
+
+func TestSkillListEsc(t *testing.T) {
+	m := model()
+	m.screen = ScreenSkillList
+	m.skillItems = []SkillItem{
+		{Name: "skill-a", Scope: "global"},
+		{Name: "skill-b", Scope: "local"},
+	}
+	m.skillCursor = 1
+	m.err = assertError{"test"}
+
+	// Esc returns to main menu and clears state.
+	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+	}
+	if m.err != nil {
+		t.Error("err should be cleared")
+	}
+	if m.skillItems != nil {
+		t.Error("skillItems should be nil after exit")
+	}
+	if m.skillCursor != 0 {
+		t.Error("skillCursor should be 0 after exit")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd")
+	}
+}
+
+func TestSkillListQKey(t *testing.T) {
+	m := model()
+	m.screen = ScreenSkillList
+	m.skillItems = []SkillItem{{Name: "skill-a", Scope: "global"}}
+
+	m, _ = updateWithCmd(m, keyQ)
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu after q", m.screen)
+	}
+}
+
+func TestSkillListPayload(t *testing.T) {
+	t.Run("valid payload transitions to ScreenSkillList", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenRunningCmd
+		p := &protocol.CommandResultPayload{
+			Success: true,
+			Data: `名称                              范围         自动注入
+api-design-principles           global     -
+architecture-decision-records   global     -`,
+		}
+		if !m.skillListPayload(p) {
+			t.Fatal("skillListPayload returned false")
+		}
+		if m.screen != ScreenSkillList {
+			t.Errorf("screen = %d, want ScreenSkillList", m.screen)
+		}
+		if len(m.skillItems) != 2 {
+			t.Errorf("got %d items, want 2", len(m.skillItems))
+		}
+		if m.skillCursor != 0 {
+			t.Errorf("cursor = %d, want 0 (first skill)", m.skillCursor)
+		}
+	})
+
+	t.Run("nil payload returns false", func(t *testing.T) {
+		m := model()
+		if m.skillListPayload(nil) {
+			t.Error("expected false for nil payload")
+		}
+	})
+
+	t.Run("failed payload returns false", func(t *testing.T) {
+		m := model()
+		p := &protocol.CommandResultPayload{Success: false, Data: "error message"}
+		if m.skillListPayload(p) {
+			t.Error("expected false for failed payload")
+		}
+	})
+
+	t.Run("empty data returns false", func(t *testing.T) {
+		m := model()
+		p := &protocol.CommandResultPayload{Success: true, Data: ""}
+		if m.skillListPayload(p) {
+			t.Error("expected false for empty data")
+		}
+	})
+}
+
+func TestSkillListNonKeyMsg(t *testing.T) {
+	m := model()
+	m.screen = ScreenSkillList
+	m.skillItems = []SkillItem{{Name: "skill-a", Scope: "global"}}
+
+	// Non-key messages should be ignored.
+	m = update(m, tea.WindowSizeMsg{Width: 100, Height: 50})
+	if m.screen != ScreenSkillList {
+		t.Error("non-key msg should not change screen")
+	}
+}
+
+func TestShowOutputBackToSkillList(t *testing.T) {
+	m := model()
+	m.screen = ScreenShowOutput
+	m.cmdOutput = "skill description content"
+	m.prevScreen = ScreenSkillList
+
+	// Esc should go back to skill list, not main menu.
+	m, _ = updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.screen != ScreenSkillList {
+		t.Errorf("screen = %d, want ScreenSkillList", m.screen)
+	}
+	if m.err != nil {
+		t.Error("err should be cleared")
+	}
+	if m.prevScreen != ScreenMainMenu {
+		t.Error("prevScreen should be reset to ScreenMainMenu")
+	}
+}
+
 // ─── Update: Show Output back-navigation ───────────────────────────
 
 func TestShowOutputBackToHistoryList(t *testing.T) {

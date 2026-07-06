@@ -182,10 +182,13 @@ type FlycheckResultMsg struct {
 
 // SubcommandResultMsg is a generic result wrapper for subcommand-group
 // methods (History, Skill, Memory, Project, Role, Tool, Mail, Service).
+// Group identifies which group (e.g. "history", "skill") — used by the TUI
+// to route the result to the correct list parser.
 type SubcommandResultMsg struct {
 	Payload *protocol.CommandResultPayload
 	Err     error
-	Subcmd  string // which subcommand was invoked
+	Subcmd  string // which subcommand was invoked (e.g. "list", "show")
+	Group   string // which subcommand group (e.g. "history", "skill")
 }
 
 // ChatSessionReadyMsg is emitted when a chat session has been created

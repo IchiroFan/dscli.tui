@@ -91,6 +91,8 @@ func (m *RootModel) renderStatusBar() string {
 		screenName = "📄 Output"
 	case ScreenHistoryList:
 		screenName = "📝 History"
+	case ScreenSkillList:
+		screenName = "🛠  Skill"
 	case ScreenAskUser:
 		screenName = "❓ Ask"
 	case ScreenRunningCmd:
@@ -133,6 +135,8 @@ func (m *RootModel) View() string {
 		return m.viewChatting()
 	case ScreenAskUser:
 		return m.viewAskUser()
+	case ScreenSkillList:
+		return m.viewSkillList()
 	case ScreenQuitting:
 		return "Goodbye.\n"
 	default:
@@ -329,6 +333,83 @@ func (m *RootModel) viewHistoryList() string {
 
 	// Scroll indicator: bottom
 	remaining := len(m.historyItems) - end
+	if remaining > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more items below", remaining)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · Esc/q back to menu"))
+	b.WriteString("\n")
+
+	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+}
+
+// ─── Skill List ─────────────────────────────────────────────────
+
+// viewSkillList renders the selectable skill list.
+func (m *RootModel) viewSkillList() string {
+	var b strings.Builder
+
+	b.WriteString(HeaderStyle.Render("🛠  Skills"))
+	b.WriteString("\n")
+
+	if len(m.skillItems) == 0 {
+		b.WriteString(NoDataStyle.Render("No skills found."))
+		b.WriteString("\n\n")
+		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
+		b.WriteString("\n")
+		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	}
+
+	// Calculate how many items fit.
+	// Reservations: header(2) + help line(2) + status bar(1) = 5
+	availableLines := m.Height - 5
+	if availableLines < 3 {
+		availableLines = 3
+	}
+
+	// Display range based on cursor position (keep cursor visible).
+	cursor := m.skillCursor
+	half := availableLines / 2
+	start := cursor - half
+	if start < 0 {
+		start = 0
+	}
+	end := start + availableLines
+	if end > len(m.skillItems) {
+		end = len(m.skillItems)
+		start = end - availableLines
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	// Scroll indicator: top
+	if start > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more items above", start)))
+		b.WriteString("\n")
+	}
+
+	for i := start; i < end; i++ {
+		item := m.skillItems[i]
+		// Format: "Name  Scope  [AutoInject]"
+		auto := ""
+		if item.AutoInject == "是" || item.AutoInject == "yes" {
+			auto = TimestampStyle.Render(" 🔄")
+		}
+		line := fmt.Sprintf("%s  %s%s", item.Name, item.Scope, auto)
+
+		if i == cursor {
+			b.WriteString(ListSelectedStyle.Render("▸ " + line))
+		} else {
+			b.WriteString(ListItemStyle.Render("  " + line))
+		}
+		b.WriteString("\n")
+	}
+
+	// Scroll indicator: bottom
+	remaining := len(m.skillItems) - end
 	if remaining > 0 {
 		b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more items below", remaining)))
 		b.WriteString("\n")

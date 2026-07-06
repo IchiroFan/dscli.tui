@@ -37,6 +37,8 @@ const (
 	// ScreenAskUser is a modal overlay: dscli has asked a question and the
 	// user must answer before the conversation can continue.
 	ScreenAskUser
+	// ScreenSkillList shows a parsed, selectable list of available skills.
+	ScreenSkillList
 	// ScreenQuitting performs graceful shutdown.
 	ScreenQuitting
 )
@@ -67,11 +69,18 @@ type HistoryItem struct {
 	CreatedAt string // formatted timestamp from dscli --json output
 }
 
+// ─── SkillItem ────────────────────────────────────────────────────
+
+// SkillItem represents one entry in the dscli skill list.
+type SkillItem struct {
+	Name       string // skill name
+	Scope      string // "global" | "local" | "built-in"
+	AutoInject string // "是" | "-"
+}
+
 // ─── RootModel ─────────────────────────────────────────────────────
 
 // RootModel is the top-level Bubble Tea model.
-//
-// State machine overview:
 //
 //	ScreenMainMenu ←── ScreenHistoryList ←── ScreenShowOutput*
 //	    │                        │
@@ -87,13 +96,11 @@ type HistoryItem struct {
 //	    │                                   │
 //	    │                           └──→ ScreenChatting (resume)
 //	    │
+//	    ├──(history selected)──→ ScreenRunningCmd ──→ ScreenHistoryList
+//	    │                              │
+//	    ├──(skill selected)────→ ScreenRunningCmd ──→ ScreenSkillList
+//	    │                              │
 //	    └──(command selected)──→ ScreenRunningCmd
-//	                                │
-//	                        (result received)
-//	                                │
-//	                        └──→ ScreenShowOutput
-//	                                │
-//	                        (* when prevScreen is set: back to prevScreen instead of menu)
 type RootModel struct {
 	// Core
 	screen Screen
@@ -125,6 +132,10 @@ type RootModel struct {
 	// ── History list ────────────────────────────────────────────
 	historyItems  []HistoryItem // parsed from "dscli history list"
 	historyCursor int           // currently highlighted item index
+
+	// ── Skill list ─────────────────────────────────────────────
+	skillItems  []SkillItem // parsed from "dscli skill list"
+	skillCursor int         // currently highlighted item index
 
 	// ── Chat
 	chatHistory   []ChatLine           // accumulated conversation

@@ -60,6 +60,8 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateChatting(msg)
 	case ScreenAskUser:
 		return m.updateAskUser(msg)
+	case ScreenSkillList:
+		return m.updateSkillList(msg)
 	case ScreenQuitting:
 		return m, tea.Quit
 	default:
@@ -92,6 +94,8 @@ func (m *RootModel) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if m.chatScroll < m.chatScrollMax {
 				m.chatScroll++
 			}
+		case ScreenHistoryList, ScreenSkillList:
+			// Wheel events are not applied to selectable lists (use keyboard).
 		}
 
 	case tea.MouseButtonWheelDown:
@@ -114,6 +118,8 @@ func (m *RootModel) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if m.chatScroll > 0 {
 				m.chatScroll--
 			}
+		case ScreenHistoryList, ScreenSkillList:
+			// Wheel events are not applied to selectable lists (use keyboard).
 		}
 	}
 	return m, nil
@@ -153,7 +159,8 @@ func (m *RootModel) updateMainMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.historyItems = nil
 		m.historyCursor = 0
-		return m, nil
+		m.skillItems = nil
+		m.skillCursor = 0
 	}
 
 	return m, nil
@@ -200,35 +207,37 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 		m.historyItems = nil
 		m.historyCursor = -1
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.History, "list", "--json", "--histsize", "500")
+		return m, cmdSubcommand(m.agent, m.agent.History, "list", "history", "--json", "--histsize", "500")
 
 	case 6: // Skill
+		m.skillItems = nil
+		m.skillCursor = -1
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.Skill, "list")
+		return m, cmdSubcommand(m.agent, m.agent.Skill, "list", "skill")
 
 	case 7: // Memory
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.Memory, "search")
+		return m, cmdSubcommand(m.agent, m.agent.Memory, "search", "memory")
 
 	case 8: // Project
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.Project, "list")
+		return m, cmdSubcommand(m.agent, m.agent.Project, "list", "project")
 
 	case 9: // Role
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.Role, "list")
+		return m, cmdSubcommand(m.agent, m.agent.Role, "list", "role")
 
 	case 10: // Tool
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.Tool, "list")
+		return m, cmdSubcommand(m.agent, m.agent.Tool, "list", "tool")
 
 	case 11: // Mail
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.Mail, "list")
+		return m, cmdSubcommand(m.agent, m.agent.Mail, "list", "mail")
 
 	case 12: // Service
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.Service, "list")
+		return m, cmdSubcommand(m.agent, m.agent.Service, "list", "service")
 
 	case 13: // Quit
 		m.screen = ScreenQuitting
@@ -277,11 +286,16 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case aiagent.SubcommandResultMsg:
-		// History "list" goes to selection screen, all others go to output.
-		if msg.Subcmd == "list" && m.historyListPayload(msg.Payload) {
+		// Route list results to specific handlers based on group.
+		if msg.Subcmd == "list" && msg.Group == "skill" && m.skillListPayload(msg.Payload) {
+			// Parsed as skill items — transition to ScreenSkillList.
+		} else if msg.Subcmd == "list" && m.historyListPayload(msg.Payload) {
 			// Parsed as history items — transition to ScreenHistoryList.
+		} else if msg.Subcmd == "show" && msg.Group == "skill" {
+			m.prevScreen = ScreenSkillList
+			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		} else if msg.Subcmd == "show" {
-			// Coming from history list selection — return there on exit.
 			m.prevScreen = ScreenHistoryList
 			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
 				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
@@ -378,7 +392,7 @@ func (m *RootModel) updateHistoryList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			id := m.historyItems[m.historyCursor].ID
 			m.screen = ScreenRunningCmd
-			return m, cmdSubcommand(m.agent, m.agent.History, "show", id)
+			return m, cmdSubcommand(m.agent, m.agent.History, "show", "history", id)
 
 		case "esc", "q":
 			m.historyItems = nil
@@ -389,6 +403,131 @@ func (m *RootModel) updateHistoryList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// ─── Skill List (selectable) ────────────────────────────────────
+
+// updateSkillList handles keyboard input on the skill selection screen.
+func (m *RootModel) updateSkillList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "k":
+			if m.skillCursor > 0 {
+				m.skillCursor--
+			}
+			return m, nil
+
+		case "down", "j":
+			if m.skillCursor < len(m.skillItems)-1 {
+				m.skillCursor++
+			}
+			return m, nil
+
+		case "enter", " ":
+			if m.skillCursor < 0 || m.skillCursor >= len(m.skillItems) {
+				return m, nil
+			}
+			name := m.skillItems[m.skillCursor].Name
+			m.screen = ScreenRunningCmd
+			return m, cmdSubcommand(m.agent, m.agent.Skill, "show", "skill", name)
+
+		case "esc", "q":
+			m.skillItems = nil
+			m.skillCursor = 0
+			m.screen = ScreenMainMenu
+			m.err = nil
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// skillListPayload tries to parse a CommandResultPayload as skill list output.
+// Returns true and transitions to ScreenSkillList on success.
+func (m *RootModel) skillListPayload(p *protocol.CommandResultPayload) bool {
+	if p == nil || !p.Success || p.Data == "" {
+		return false
+	}
+	items := parseSkillList(p.Data)
+	if len(items) == 0 {
+		return false
+	}
+	m.skillItems = items
+	m.skillCursor = 0 // select first skill
+	m.screen = ScreenSkillList
+	return true
+}
+
+// parseSkillList parses the "dscli skill list" text table output into SkillItem slice.
+// Expected format (Chinese headers):
+//
+//	名称                              范围         自动注入
+//	api-design-principles           global     -
+//	...
+func parseSkillList(data string) []SkillItem {
+	lines := strings.Split(data, "\n")
+	var items []SkillItem
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip header line (contains Chinese characters).
+		if strings.Contains(line, "名称") || strings.Contains(line, "范围") {
+			continue
+		}
+		// Skip separator lines (e.g. "────").
+		if strings.HasPrefix(line, "─") || strings.HasPrefix(line, "-") {
+			continue
+		}
+		// Parse: name (multi-word)  scope  auto-inject
+		// Columns are separated by 2+ spaces.
+		fields := splitByTwoOrMoreSpaces(line)
+		if len(fields) < 2 {
+			continue
+		}
+		item := SkillItem{
+			Name:  fields[0],
+			Scope: fields[1],
+		}
+		if len(fields) >= 3 {
+			item.AutoInject = fields[2]
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
+// splitByTwoOrMoreSpaces splits a line by 2+ consecutive spaces.
+func splitByTwoOrMoreSpaces(line string) []string {
+	var fields []string
+	var current strings.Builder
+	spaceCount := 0
+	for _, r := range line {
+		if r == ' ' {
+			spaceCount++
+			if spaceCount >= 2 && current.Len() > 0 {
+				fields = append(fields, strings.TrimSpace(current.String()))
+				current.Reset()
+				spaceCount = 0
+			}
+		} else {
+			if spaceCount == 1 && current.Len() > 0 {
+				// Single space within a field — keep it.
+				current.WriteRune(' ')
+			} else if spaceCount >= 2 && current.Len() > 0 {
+				// Already handled above (split). Start collecting new field.
+				current.Reset()
+			}
+			current.WriteRune(r)
+			spaceCount = 0
+		}
+	}
+	if current.Len() > 0 {
+		fields = append(fields, strings.TrimSpace(current.String()))
+	}
+	return fields
 }
 
 // ─── Show Output (scrollable) ────────────────────────────────────
