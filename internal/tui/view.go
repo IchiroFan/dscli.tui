@@ -178,21 +178,71 @@ func (m *RootModel) viewShowOutput() string {
 	if !m.cmdSuccess {
 		icon = "⚠️ "
 	}
-
 	b.WriteString(HeaderStyle.Render(fmt.Sprintf("%s Output", icon)))
 	b.WriteString("\n")
 
-	if m.cmdOutput != "" {
-		b.WriteString(m.cmdOutput)
+	// Calculate available height for output content.
+	// Reservations: header(2) + help lines(2) + status bar(1) = 5
+	availableHeight := m.Height - 5
+	if availableHeight < 3 {
+		availableHeight = 3
+	}
+
+	// Fallback: split cmdOutput if outputLines hasn't been initialised.
+	outputLines := m.outputLines
+	if outputLines == nil {
+		if m.cmdOutput != "" {
+			outputLines = strings.Split(m.cmdOutput, "\n")
+		} else {
+			outputLines = []string{}
+		}
+	}
+
+	totalLines := len(outputLines)
+
+	// Compute scroll max and clamp scroll (read-only, no side-effect on model).
+	scrollMax := totalLines - availableHeight
+	if scrollMax < 0 {
+		scrollMax = 0
+	}
+	scroll := m.outputScroll
+	if scroll > scrollMax {
+		scroll = scrollMax
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+
+	// ── Scroll indicator: top ──
+	if scroll > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more lines above  (g: top)", scroll)))
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
-	b.WriteString(HelpStyle.Render("Press any key to return to menu"))
+	// ── Visible content ──
+	end := scroll + availableHeight
+	if end > totalLines {
+		end = totalLines
+	}
+	for _, line := range outputLines[scroll:end] {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	// ── Scroll indicator: bottom ──
+	remaining := totalLines - end
+	if remaining > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more lines below  (G: bottom)", remaining)))
+		b.WriteString("\n")
+	}
+
+	// ── Help bar ──
+	b.WriteString(HelpStyle.Render("↑↓ scroll · PgUp/PgDn page · g/G top/bottom · Esc/q back to menu"))
 	b.WriteString("\n")
 
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
 }
+
 
 // ─── Chatting ────────────────────────────────────────────────────────
 

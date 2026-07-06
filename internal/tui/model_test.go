@@ -479,34 +479,157 @@ func TestRunningCmdEscOnlyForEsc(t *testing.T) {
 
 
 
-// ─── Update: Show Output ────────────────────────────────────────────────────
+// ─── Update: Show Output (scrollable) ──────────────────────────────────
 
-func TestShowOutputAnyKey(t *testing.T) {
-	m := model()
-	m.screen = ScreenShowOutput
-	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+func TestShowOutputExitKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		key  tea.KeyMsg
+	}{
+		{"esc exits", tea.KeyMsg{Type: tea.KeyEscape}},
+		{"q exits", keyQ},
+		{"enter exits", tea.KeyMsg{Type: tea.KeyEnter}},
+	}
 
-	// Direct transition: any key immediately returns to main menu.
-	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
-	}
-	if m.err != nil {
-		t.Error("err should be cleared when returning to menu")
-	}
-	if cmd != nil {
-		t.Error("expected nil cmd (direct transition)")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := model()
+			m.screen = ScreenShowOutput
+			m, cmd := updateWithCmd(m, tt.key)
+
+			if m.screen != ScreenMainMenu {
+				t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+			}
+			if m.err != nil {
+				t.Error("err should be cleared when returning to menu")
+			}
+			if cmd != nil {
+				t.Error("expected nil cmd (direct transition)")
+			}
+		})
 	}
 }
 
+func TestShowOutputScrolling(t *testing.T) {
+	// Create model with multi-line output.
+	m := model()
+	m.screen = ScreenShowOutput
+	m.cmdOutput = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+	m.outputLines = strings.Split(m.cmdOutput, "\n")
+	m.outputScroll = 0
+	// Height=30, so available=25 → scrollMax = 8-25 = -1 → 0 (fits entirely)
+
+	t.Run("down scrolls when content exceeds height", func(t *testing.T) {
+		m2 := model()
+		m2.Height = 5 // tiny height so scrolling is needed
+		m2.screen = ScreenShowOutput
+		m2.cmdOutput = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+		m2.outputLines = strings.Split(m2.cmdOutput, "\n")
+		m2.outputScroll = 0
+
+		_ = update(m2, tea.KeyMsg{Type: tea.KeyDown})
+		// After one down: outputScroll should become 1 (since total=8, avail=0 after reservations...)
+		// avail = 5-5 = 0, clamped to 3. total=8 > 3 → scrollMax=5.
+		if m2.outputScroll < 1 {
+			t.Errorf("outputScroll = %d, want >= 1 after down", m2.outputScroll)
+		}
+	})
+
+	t.Run("up scrolls back", func(t *testing.T) {
+		m2 := model()
+		m2.Height = 5
+		m2.screen = ScreenShowOutput
+		m2.cmdOutput = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+		m2.outputLines = strings.Split(m2.cmdOutput, "\n")
+		m2.outputScroll = 3
+
+		_ = update(m2, tea.KeyMsg{Type: tea.KeyUp})
+		if m2.outputScroll != 2 {
+			t.Errorf("outputScroll = %d, want 2 after up", m2.outputScroll)
+		}
+	})
+
+	t.Run("home goes to top", func(t *testing.T) {
+		m2 := model()
+		m2.Height = 5
+		m2.screen = ScreenShowOutput
+		m2.cmdOutput = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+		m2.outputLines = strings.Split(m2.cmdOutput, "\n")
+		m2.outputScroll = 3
+
+		_ = update(m2, tea.KeyMsg{Type: tea.KeyHome})
+		if m2.outputScroll != 0 {
+			t.Errorf("outputScroll = %d, want 0 after home", m2.outputScroll)
+		}
+	})
+
+	t.Run("end goes to bottom", func(t *testing.T) {
+		m2 := model()
+		m2.Height = 5
+		m2.screen = ScreenShowOutput
+		m2.cmdOutput = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+		m2.outputLines = strings.Split(m2.cmdOutput, "\n")
+		m2.outputScroll = 0
+
+		_ = update(m2, tea.KeyMsg{Type: tea.KeyEnd})
+		if m2.outputScroll <= 0 {
+			t.Errorf("outputScroll = %d, want > 0 after end", m2.outputScroll)
+		}
+	})
+
+	t.Run("g goes to top", func(t *testing.T) {
+		m2 := model()
+		m2.Height = 5
+		m2.screen = ScreenShowOutput
+		m2.cmdOutput = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+		m2.outputLines = strings.Split(m2.cmdOutput, "\n")
+		m2.outputScroll = 3
+
+		_ = update(m2, keyRune('g'))
+		if m2.outputScroll != 0 {
+			t.Errorf("outputScroll = %d, want 0 after g", m2.outputScroll)
+		}
+	})
+
+	t.Run("G goes to bottom", func(t *testing.T) {
+		m2 := model()
+		m2.Height = 5
+		m2.screen = ScreenShowOutput
+		m2.cmdOutput = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+		m2.outputLines = strings.Split(m2.cmdOutput, "\n")
+		m2.outputScroll = 0
+
+		_ = update(m2, keyRune('G'))
+		if m2.outputScroll <= 0 {
+			t.Errorf("outputScroll = %d, want > 0 after G", m2.outputScroll)
+		}
+	})
+
+	t.Run("non-navigation keys do not exit", func(t *testing.T) {
+		m2 := model()
+		m2.screen = ScreenShowOutput
+		m2.cmdOutput = "some output"
+		m2.outputLines = strings.Split(m2.cmdOutput, "\n")
+
+		// Random key should NOT exit.
+		m2 = update(m2, keyRune('x'))
+		if m2.screen != ScreenShowOutput {
+			t.Errorf("screen = %d, want ScreenShowOutput (non-exit key ignored)", m2.screen)
+		}
+	})
+}
 
 func TestShowOutputNonKeyIgnored(t *testing.T) {
 	m := model()
 	m.screen = ScreenShowOutput
+	m.cmdOutput = "some output"
+	m.outputLines = strings.Split(m.cmdOutput, "\n")
 	m = update(m, tea.WindowSizeMsg{Width: 100, Height: 50})
 	if m.screen != ScreenShowOutput {
 		t.Errorf("screen = %d, want ScreenShowOutput (non-key msgs ignored)", m.screen)
 	}
 }
+
 
 // ─── Update: Chatting ───────────────────────────────────────────────────────
 
@@ -1353,13 +1476,16 @@ func TestViewShowOutput(t *testing.T) {
 		}
 	})
 
-	t.Run("any key hint", func(t *testing.T) {
+	t.Run("exit hint shown", func(t *testing.T) {
 		m := model()
 		m.screen = ScreenShowOutput
 		v := m.View()
 
-		if !strings.Contains(v, "return to menu") {
-			t.Error("view should contain hint to return to menu")
+		if !strings.Contains(v, "Esc/q") {
+			t.Error("view should contain exit hint 'Esc/q'")
+		}
+		if !strings.Contains(v, "back to menu") {
+			t.Error("view should contain 'back to menu' hint")
 		}
 	})
 }

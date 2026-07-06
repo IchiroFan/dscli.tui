@@ -186,41 +186,36 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case aiagent.BalanceResultMsg:
-		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
-		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		m.screen = ScreenShowOutput
+		m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+			msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		return m, nil
 
 	case aiagent.ModelsResultMsg:
-		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
-		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		m.screen = ScreenShowOutput
+		m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+			msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		return m, nil
 
 	case aiagent.VersionResultMsg:
-		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
-		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		if m.cmdSuccess {
+		cmdOut := formatCommandResult(msg.Payload, msg.Err)
+		success := msg.Err == nil && msg.Payload != nil && msg.Payload.Success
+		if success {
 			m.dscliVersion = strings.TrimSpace(msg.Payload.Data)
 			// Keep only the first line (version summary).
 			if idx := strings.Index(m.dscliVersion, "\n"); idx > 0 {
 				m.dscliVersion = m.dscliVersion[:idx]
 			}
 		}
-		m.screen = ScreenShowOutput
+		m.showOutput(cmdOut, success)
 		return m, nil
 
-
 	case aiagent.FlycheckResultMsg:
-		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
-		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		m.screen = ScreenShowOutput
+		m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+			msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		return m, nil
 
 	case aiagent.SubcommandResultMsg:
-		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
-		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
-		m.screen = ScreenShowOutput
+		m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+			msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		return m, nil
 
 	// Catch-all: if we receive any other message while running, ignore.
@@ -230,18 +225,78 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 
-// ─── Show Output ─────────────────────────────────────────────────────
+// showOutput transitions to ScreenShowOutput with pre-split lines for scrolling.
+func (m *RootModel) showOutput(cmdOutput string, cmdSuccess bool) {
+	m.cmdOutput = cmdOutput
+	m.cmdSuccess = cmdSuccess
+	m.outputLines = strings.Split(cmdOutput, "\n")
+	m.outputScroll = 0
+	m.outputScrollMax = 0
+	m.screen = ScreenShowOutput
+}
+
+
+// ─── Show Output (scrollable) ────────────────────────────────
+
 
 func (m *RootModel) updateShowOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Any key goes back to menu — direct transition.
-		m.screen = ScreenMainMenu
-		m.err = nil
-		return m, nil
+		// Recalculate scroll max based on current terminal height.
+		// Height reservations: header(2) + help lines(2) + status bar(1) = 5
+		availableHeight := m.Height - 5
+		if availableHeight < 3 {
+			availableHeight = 3
+		}
+		totalLines := len(m.outputLines)
+		if totalLines > availableHeight {
+			m.outputScrollMax = totalLines - availableHeight
+		} else {
+			m.outputScrollMax = 0
+		}
+
+		switch msg.String() {
+		case "up", "k":
+			if m.outputScroll > 0 {
+				m.outputScroll--
+			}
+			return m, nil
+		case "down", "j":
+			if m.outputScroll < m.outputScrollMax {
+				m.outputScroll++
+			}
+			return m, nil
+		case "pgup":
+			pageSize := availableHeight
+			m.outputScroll -= pageSize
+			if m.outputScroll < 0 {
+				m.outputScroll = 0
+			}
+			return m, nil
+		case "pgdown":
+			pageSize := availableHeight
+			m.outputScroll += pageSize
+			if m.outputScroll > m.outputScrollMax {
+				m.outputScroll = m.outputScrollMax
+			}
+			return m, nil
+		case "home", "g":
+			m.outputScroll = 0
+			return m, nil
+		case "end", "G":
+			m.outputScroll = m.outputScrollMax
+			return m, nil
+		case "esc", "q", "enter":
+			// Explicit exit keys — return to menu.
+			m.screen = ScreenMainMenu
+			m.err = nil
+			return m, nil
+		}
+		// All other keys ignored (no accidental exit).
 	}
 	return m, nil
 }
+
 
 
 // ─── Chatting ────────────────────────────────────────────────────────
@@ -251,10 +306,8 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Session ready ────────────────────────────────────────────
 	case aiagent.ChatSessionReadyMsg:
 		if msg.Err != nil {
-			m.err = fmt.Errorf("chat session error: %w", msg.Err)
-			m.screen = ScreenShowOutput
-			m.cmdOutput = m.err.Error()
-			m.cmdSuccess = false
+			errMsg := fmt.Errorf("chat session error: %w", msg.Err)
+			m.showOutput(errMsg.Error(), false)
 			return m, nil
 		}
 		m.chatSession = msg.Session

@@ -98,9 +98,13 @@ type RootModel struct {
 	menuItems  []MenuItem
 	menuCursor int // currently highlighted item index
 
-	// ── Command output ────────────────────────────────────────────
-	cmdOutput  string // rendered output text
-	cmdSuccess bool   // whether the command succeeded
+	// ── Command output (scrollable) ─────────────────────────────────
+	cmdOutput    string   // rendered output text
+	cmdSuccess   bool     // whether the command succeeded
+	outputLines    []string // cmdOutput split by newlines for scrolling
+	outputScroll   int      // current scroll offset (0 = top)
+	outputScrollMax int     // max scroll offset (clamped to total - visible)
+
 
 	// ── Chat ──────────────────────────────────────────────────────
 	chatHistory      []ChatLine           // accumulated conversation
