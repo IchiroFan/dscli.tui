@@ -66,8 +66,7 @@ func cmdSubcommand(agent aiagent.AIAgent, method func(context.Context, string, .
 func cmdStartChat(agent aiagent.AIAgent, history []ChatLine) tea.Cmd {
 	return func() tea.Msg {
 		opts := aiagent.ChatSessionOptions{
-			Model:  "deepseek-chat",
-			Stream: true,
+			Model: "deepseek-chat",
 		}
 		session, err := agent.NewChatSession(context.Background(), opts)
 		if err != nil {
@@ -105,6 +104,19 @@ func cmdSendChatMessage(session *aiagent.ChatSession, history []ChatLine) tea.Cm
 	)
 }
 
+// cmdSendChimein runs dscli chat in climein mode with the given content.
+// The new dscli process either:
+//   - enters climein mode (lock held by primary) — writes to chimeins, exits quickly
+//   - becomes primary (lock released) — produces full AI response
+//   - exits abnormally — error is returned
+//
+// The result is delivered as aiagent.ChimeinResultMsg.
+func cmdSendChimein(agent aiagent.AIAgent, content string) tea.Cmd {
+	return func() tea.Msg {
+		output, err := agent.SendChimein(context.Background(), content)
+		return aiagent.ChimeinResultMsg{Output: output, Err: err}
+	}
+}
 
 // cmdWaitChatEvent blocks until the next event arrives from the chat
 // session's Events channel or the session is done.

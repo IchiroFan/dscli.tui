@@ -75,10 +75,16 @@ type AIAgent interface {
 	// Returns a ChatSession that the TUI uses to send/receive messages.
 	NewChatSession(ctx context.Context, opts ChatSessionOptions) (*ChatSession, error)
 
+	// SendChimein runs dscli chat in climein mode: writes the content to the
+	// chimeins table for the primary process to pick up. Returns the combined
+	// stdout+stderr output and any process error.
+	// When the primary process has already released its lock, the new process
+	// becomes primary instead — the returned output contains the AI response.
+	SendChimein(ctx context.Context, content string) (string, error)
+
 	// Close releases any resources held by the agent.
 	Close() error
 }
-
 // ─── ChatSessionOptions ─────────────────────────────────────
 
 // ChatSessionOptions configures a chat session.
@@ -86,7 +92,6 @@ type ChatSessionOptions struct {
 	Model      string // model name (default: deepseek-chat)
 	Role       string // system role prompt (dev/expert/review/test)
 	HistSize   int    // number of history messages to include context
-	Stream     bool   // enable incremental output (dscli --stream)
 	DscliPath  string // path to dscli executable (empty = use resolved path)
 	ProjectDir string // working directory for the dscli process
 }
@@ -188,4 +193,11 @@ type SubcommandResultMsg struct {
 type ChatSessionReadyMsg struct {
 	Session *ChatSession
 	Err     error
+}
+
+// ChimeinResultMsg wraps the result of AIAgent.SendChimein.
+// Output is the full stdout+stderr output of the climein dscli process.
+type ChimeinResultMsg struct {
+	Output string
+	Err    error
 }

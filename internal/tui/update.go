@@ -122,7 +122,6 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 		m.chatDone = false
 		m.chatScroll = 0
 		m.chatScrollMax = 0
-		m.chatPendingInput = ""
 		return m, cmdStartChat(m.agent, nil)
 
 	case 1: // Balance
@@ -437,6 +436,32 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m.handleChatEvent(msg.Message)
 
+	// ── Chimein result (interleaved message sent during loading) ──
+	case aiagent.ChimeinResultMsg:
+		if msg.Err != nil {
+			// dscli process exited abnormally — show error popup.
+			errMsg := fmt.Sprintf("⚠️ 插话失败: %v\n%s", msg.Err, msg.Output)
+			m.showOutput(errMsg, false)
+			return m, nil
+		}
+		// Check if the process ran as climein (primary lock held).
+		// Climein mode outputs a confirmation message and exits quickly.
+		// Primary mode (edge case: old session finished) produces AI output.
+		if strings.Contains(msg.Output, "已有主 chat 进程运行中") ||
+			strings.Contains(msg.Output, "插话内容为空") {
+			// Climein mode: primary process will pick up the chimein.
+			// Continue waiting for events from the old session.
+			return m, m.waitForMoreChatEvents()
+		}
+		// Primary mode (edge case): the old session released the lock.
+		// The output is the AI response — add it to chat history.
+		m.appendToLastAssistant(msg.Output, "")
+		m.chatLoading = false
+		m.chatDone = true
+		m.spinnerOn = false
+		focusCmd := m.chatInput.Focus()
+		return m, focusCmd
+
 	// ── Keyboard input ───────────────────────────────────────────
 	case tea.KeyMsg:
 		// During loading (AI responding), block Enter but allow
@@ -454,14 +479,14 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "enter":
 				// Interleaved chat (插入对话): user can type while AI is responding.
-				// The message is added to history immediately and auto-sent when
-				// the current response finishes (see TypeChatDone / TypeGoodbye).
+				// Start a new dscli chat process immediately — it enters climein mode
+				// (writes to chimeins table) or becomes primary if the old session has
+				// already released the lock.
 				input := strings.TrimSpace(m.chatInput.Value())
 				m.chatHistory = append(m.chatHistory, ChatLine{Role: "user", Content: input})
-				m.chatPendingInput = input
 				m.chatInput.SetValue("")
 				m.chatScroll = 0
-				return m, nil
+				return m, cmdSendChimein(m.agent, input)
 			case "pgup", "shift+up":
 				if m.chatScroll < m.chatScrollMax {
 					m.chatScroll++
@@ -627,8 +652,9 @@ func (m *RootModel) appendToLastAssistant(content, reasoning string) {
 
 // handleChatDone is called when the current chat exchange is complete
 // (via TypeChatDone, TypeGoodbye, or Events channel closed).
-// It sets the done state, handles interleaved pending input, and re-focuses
-// the chat input for the next exchange.
+// It sets the done state and re-focuses the chat input for the next exchange.
+// Interleaved messages (typed during loading) are handled immediately via
+// cmdSendChimein — no pending-input queue.
 func (m *RootModel) handleChatDone() (tea.Model, tea.Cmd) {
 	m.chatLoading = false
 	m.chatDone = true
@@ -638,17 +664,6 @@ func (m *RootModel) handleChatDone() (tea.Model, tea.Cmd) {
 	// handler doesn't try to Close a dead process.
 	m.chatSession = nil
 
-	// Interleaved chat (插入对话): if user queued a message while AI was
-	// responding, automatically start a new exchange so the correction
-	// reaches the AI without an extra Enter press from the user.
-	if m.chatPendingInput != "" {
-		m.chatPendingInput = ""
-		m.chatLoading = true
-		m.chatDone = false
-		m.spinnerOn = true
-		m.chatInput.Blur()
-		return m, cmdStartChat(m.agent, m.chatHistory)
-	}
 
 	focusCmd := m.chatInput.Focus()
 	return m, focusCmd

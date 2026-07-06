@@ -126,14 +126,13 @@ type RootModel struct {
 	historyCursor int           // currently highlighted item index
 
 	// ── Chat
-	chatHistory      []ChatLine           // accumulated conversation
-	chatInput        textarea.Model       // multi-line chat message input
-	chatLoading      bool                 // true while waiting for AI response
-	chatSession      *aiagent.ChatSession // active session (one per exchange)
-	chatDone         bool                 // true when the current exchange is done
-	chatPendingInput string               // user message waiting to be sent to dscli
-	chatScroll       int                  // 0 = bottom, >0 = lines scrolled up
-	chatScrollMax    int                  // max scroll offset from last render
+	chatHistory   []ChatLine           // accumulated conversation
+	chatInput     textarea.Model       // multi-line chat message input
+	chatLoading   bool                 // true while waiting for AI response
+	chatSession   *aiagent.ChatSession // active session (one per exchange)
+	chatDone      bool                 // true when the current exchange is done
+	chatScroll    int                  // 0 = bottom, >0 = lines scrolled up
+	chatScrollMax int                  // max scroll offset from last render
 
 	// ── Spinner (loading animation) ────────────────────────────────
 	spinner   spinner.Model

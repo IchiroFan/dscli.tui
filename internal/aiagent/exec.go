@@ -15,6 +15,8 @@ import (
 	"gitcode.com/dscli/dscli.tui/pkg/jsonline"
 )
 
+const chunkThreshold = 80 // emit chunk on \n or when this many bytes accumulate
+
 // ─── execAgent ──────────────────────────────────────────────
 
 // execAgent implements AIAgent by executing dscli as a subprocess
@@ -199,27 +201,21 @@ func (a *execAgent) execDS(ctx context.Context, args ...string) (*protocol.Comma
 // NewChatSession starts a dscli chat subprocess and returns a ChatSession
 // for one-shot exchange (one user message → one response).
 //
-// When opts.Stream is true, dscli is run with --stream, which means it
-// consumes SSE internally and outputs plain-text content deltas to stdout
-// progressively.  Combined with byte-by-byte pipe reading, this gives
-// smooth real-time display.
-//
-// Without --stream, the full response arrives in a single burst after the
-// API call completes.  Both modes work; --stream provides better UX.
+// dscli runs without --stream (non-streaming API). It calls the DeepSeek
+// API, receives the full response, then outputs the content to stdout via
+// PrintContent.  The TUI reads stdout byte-by-byte and emits a ChatChunkPayload
+// whenever the accumulated content reaches chunkThreshold bytes, or on EOF.
 //
 // Flow per exchange:
 //  1. Emit TypeReady immediately (session starts ready).
 //  2. Wait for ChatRequestPayload from TUI.
 //  3. Write the user message to the process stdin and close stdin.
-//  4. Read stdout byte-by-byte, emitting ChatChunkPayload for each chunk.
+//  4. Read stdout byte-by-byte, emitting ChatChunkPayload per fixed-size chunk.
 //  5. On EOF, emit ChatDonePayload.
 //  6. Call cmd.Wait() to collect the process exit code.
 //     If non-zero, emit an error chunk so the TUI can display it.
 func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions) (*ChatSession, error) {
 	args := []string{"chat"}
-	if opts.Stream {
-		args = append(args, "--stream")
-	}
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -299,19 +295,10 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 			io.WriteString(stdin, userMsg+"\n")
 			stdin.Close()
 
-			// 4. Read stdout byte-by-byte, emitting chunks in real-time.
-			//
-			//    dscli chat outputs the response progressively:
-			//      a) User echo (outfmt.PrintUserContent) — starts with 👤,
-			//         ends with "------\n".
-			//      b) AI response via PrintContent — may arrive without newlines.
-			//      c) Reasoning section via PrintContent (💭 header) —
-			//         only when the model provides reasoning_content.
-			//      d) Token stats + session stats at the end.
-			//
-			//    We DO NOT filter echo/stats here — letting everything through
-			//    guarantees the AI response is never lost.  View-level filtering
-			//    can be added later.
+			// 4. Read stdout byte-by-byte, emitting a ChatChunkPayload whenever
+			//    chunkThreshold bytes have accumulated, or on EOF.  dscli outputs
+			//    the full response (non-streaming) via PrintContent, so data may
+			//    arrive in bursts — the byte-by-byte loop handles that gracefully.
 			var chunkBuf strings.Builder
 			reader := bufio.NewReader(stdout)
 
@@ -328,9 +315,10 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 					break
 				}
 				chunkBuf.WriteByte(b)
-				// Emit on newlines (natural paragraph breaks) or every 80 bytes
-				// (for long code lines without newlines).
-				if b == '\n' || chunkBuf.Len() >= 80 {
+				// Emit a chunk on each newline, or when the buffer reaches
+				// the fixed threshold — ensures smooth incremental rendering
+				// even for long lines without line breaks.
+				if b == '\n' || chunkBuf.Len() >= chunkThreshold {
 					events <- &protocol.Message{
 						Type:    protocol.TypeChatChunk,
 						Payload: &protocol.ChatChunkPayload{Content: chunkBuf.String()},
@@ -349,7 +337,7 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 			// termination" illusion).
 			if waitErr != nil {
 				events <- &protocol.Message{
-					Type:    protocol.TypeChatChunk,
+					Type: protocol.TypeChatChunk,
 					Payload: &protocol.ChatChunkPayload{
 						Content: fmt.Sprintf("\n⚠️ dscli exited with error: %v\n", waitErr),
 					},
@@ -383,6 +371,25 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 			}
 		},
 	}, nil
+}
+
+// ── SendChimein ─────────────────────────────────────────────
+
+// SendChimein runs dscli chat with the given content on stdin.
+// If another dscli chat process holds the project lock, this instance
+// enters climein mode (writes to chimeins table and exits quickly).
+// Otherwise it becomes the primary process and produces a full AI response.
+//
+// Returns the combined stdout+stderr output and any process error.
+func (a *execAgent) SendChimein(ctx context.Context, content string) (string, error) {
+	cmd := exec.CommandContext(ctx, a.dscliPath, "chat")
+	cmd.Stdin = strings.NewReader(content + "\n")
+	out, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(out))
+	if err != nil {
+		return output, fmt.Errorf("dscli chat (climein) failed: %w", err)
+	}
+	return output, nil
 }
 
 // ── Close ───────────────────────────────────────────────────

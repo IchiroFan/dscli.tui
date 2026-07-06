@@ -77,6 +77,9 @@ func (m *mockAgent) Service(context.Context, string, ...string) (*protocol.Comma
 func (m *mockAgent) NewChatSession(context.Context, aiagent.ChatSessionOptions) (*aiagent.ChatSession, error) {
 	return nil, nil
 }
+func (m *mockAgent) SendChimein(_ context.Context, content string) (string, error) {
+	return "", nil
+}
 func (m *mockAgent) Close() error { return nil }
 
 // mockSession creates a ChatSession backed by buffered channels for testing.
@@ -1082,17 +1085,13 @@ func TestChattingInterleavedDuringLoading(t *testing.T) {
 
 	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Should NOT start a new session (cmd should be nil).
-	if cmd != nil {
-		t.Error("expected nil cmd (interleaved — don't start new session yet)")
+	// Should start a climein dscli process immediately (non-nil cmd).
+	if cmd == nil {
+		t.Error("expected non-nil cmd (cmdSendChimein)")
 	}
 	// Message should be in history immediately.
 	if len(m.chatHistory) != 1 || m.chatHistory[0].Content != "correction" {
 		t.Errorf("history = %+v, want [{user correction}]", m.chatHistory)
-	}
-	// Pending input should be set.
-	if m.chatPendingInput != "correction" {
-		t.Errorf("chatPendingInput = %q, want %q", m.chatPendingInput, "correction")
 	}
 	// Input should be cleared.
 	if m.chatInput.Value() != "" {
@@ -1117,11 +1116,8 @@ func TestChattingInterleavedMultipleDuringLoading(t *testing.T) {
 	if len(m.chatHistory) != 1 || m.chatHistory[0].Content != "first correction" {
 		t.Fatalf("after first: history = %+v", m.chatHistory)
 	}
-	if m.chatPendingInput != "first correction" {
-		t.Errorf("pendingInput = %q, want %q", m.chatPendingInput, "first correction")
-	}
 
-	// Second interleaved message overwrites pending.
+	// Second interleaved message — each Enter starts its own climein process.
 	m.chatInput.SetValue("second correction")
 	m = update(m, tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -1134,9 +1130,6 @@ func TestChattingInterleavedMultipleDuringLoading(t *testing.T) {
 	if m.chatHistory[1].Content != "second correction" {
 		t.Errorf("history[1] = %q, want %q", m.chatHistory[1].Content, "second correction")
 	}
-	if m.chatPendingInput != "second correction" {
-		t.Errorf("pendingInput = %q, want %q", m.chatPendingInput, "second correction")
-	}
 }
 
 func TestChattingInterleavedEmptyDuringLoading(t *testing.T) {
@@ -1148,53 +1141,44 @@ func TestChattingInterleavedEmptyDuringLoading(t *testing.T) {
 
 	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Empty interleaved messages should also be accepted.
-	if cmd != nil {
-		t.Error("expected nil cmd")
+	// Empty interleaved messages should also be accepted — cmd is non-nil.
+	if cmd == nil {
+		t.Error("expected non-nil cmd (cmdSendChimein)")
 	}
 	if len(m.chatHistory) != 1 || m.chatHistory[0].Content != "" {
 		t.Errorf("history = %+v, want [{user ''}]", m.chatHistory)
 	}
-	if m.chatPendingInput != "" {
-		t.Errorf("pendingInput = %q, want empty", m.chatPendingInput)
-	}
 }
 
-func TestChattingTypeChatDoneWithPendingInput(t *testing.T) {
+func TestChattingTypeChatDoneSetsDoneState(t *testing.T) {
 	m := model()
 	m.screen = ScreenChatting
 	m.chatLoading = true
 	m.chatDone = false
-	m.chatPendingInput = "correction"
 	m.chatHistory = []ChatLine{
 		{Role: "user", Content: "original"},
 		{Role: "assistant", Content: "response"},
-		{Role: "user", Content: "correction"},
 	}
 
 	msg := &protocol.Message{Type: protocol.TypeChatDone}
 	_, cmd := handleEvent(m, msg)
 
-	// Should auto-start a new session.
+	// ChatDone should just focus input (no auto-start).
 	if cmd == nil {
-		t.Fatal("expected non-nil cmd (auto-start new session)")
+		t.Fatal("expected non-nil cmd (chatInput.Focus())")
 	}
-	if !m.chatLoading {
-		t.Error("chatLoading should be true for new session")
+	if m.chatLoading {
+		t.Error("chatLoading should be false")
 	}
-	if m.chatDone {
-		t.Error("chatDone should be false for new session")
+	if !m.chatDone {
+		t.Error("chatDone should be true")
 	}
-	if !m.spinnerOn {
-		t.Error("spinnerOn should be true for new session")
+	if m.spinnerOn {
+		t.Error("spinnerOn should be false")
 	}
-	// Pending input should be cleared.
-	if m.chatPendingInput != "" {
-		t.Error("chatPendingInput should be cleared after auto-start")
-	}
-	// History should be preserved (full conversation so far).
-	if len(m.chatHistory) != 3 {
-		t.Errorf("history length = %d, want 3", len(m.chatHistory))
+	// History should be preserved.
+	if len(m.chatHistory) != 2 {
+		t.Errorf("history length = %d, want 2", len(m.chatHistory))
 	}
 	// Session should be nil (closed).
 	if m.chatSession != nil {
@@ -1207,13 +1191,12 @@ func TestChattingTypeChatDoneWithoutPending(t *testing.T) {
 	m.screen = ScreenChatting
 	m.chatLoading = true
 	m.chatDone = false
-	m.chatPendingInput = ""
 	m.chatHistory = []ChatLine{{Role: "user", Content: "hello"}}
 
 	msg := &protocol.Message{Type: protocol.TypeChatDone}
 	_, cmd := handleEvent(m, msg)
 
-	// Without pending input, should just focus input.
+	// ChatDone should just focus input.
 	if cmd == nil {
 		t.Error("expected non-nil cmd (chatInput.Focus())")
 	}
@@ -1228,36 +1211,31 @@ func TestChattingTypeChatDoneWithoutPending(t *testing.T) {
 	}
 }
 
-func TestChattingTypeGoodbyeWithPendingInput(t *testing.T) {
+func TestChattingTypeGoodbyeSetsDoneState(t *testing.T) {
 	m := model()
 	m.screen = ScreenChatting
 	m.chatLoading = true
 	m.chatDone = false
-	m.chatPendingInput = "correction"
 	m.chatHistory = []ChatLine{
 		{Role: "user", Content: "original"},
 		{Role: "assistant", Content: "response"},
-		{Role: "user", Content: "correction"},
 	}
 
 	msg := &protocol.Message{Type: protocol.TypeGoodbye}
 	_, cmd := handleEvent(m, msg)
 
-	// Should auto-start a new session.
+	// Goodbye should just focus input (no auto-start).
 	if cmd == nil {
-		t.Fatal("expected non-nil cmd (auto-start new session)")
+		t.Fatal("expected non-nil cmd (chatInput.Focus())")
 	}
-	if !m.chatLoading {
-		t.Error("chatLoading should be true")
+	if m.chatLoading {
+		t.Error("chatLoading should be false")
 	}
-	if m.chatDone {
-		t.Error("chatDone should be false")
+	if !m.chatDone {
+		t.Error("chatDone should be true")
 	}
-	if !m.spinnerOn {
-		t.Error("spinnerOn should be true")
-	}
-	if m.chatPendingInput != "" {
-		t.Error("chatPendingInput should be cleared")
+	if m.spinnerOn {
+		t.Error("spinnerOn should be false")
 	}
 }
 
