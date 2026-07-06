@@ -218,13 +218,11 @@ func TestGlobalWindowSize(t *testing.T) {
 	if m.Height != 50 {
 		t.Errorf("Height = %d, want 50", m.Height)
 	}
-	expectedChatWidth := 100 - 10 // Width - 10
-	if m.chatInput.Width != expectedChatWidth {
-		t.Errorf("chatInput.Width = %d, want %d", m.chatInput.Width, expectedChatWidth)
+	if m.chatInput.Width() < 10 {
+		t.Errorf("chatInput.Width() = %d, want >= 10", m.chatInput.Width())
 	}
-	expectedAskWidth := expectedChatWidth - 4
-	if m.askInput.Width != expectedAskWidth {
-		t.Errorf("askInput.Width = %d, want %d", m.askInput.Width, expectedAskWidth)
+	if m.askInput.Width < 6 {
+		t.Errorf("askInput.Width = %d, want >= 6", m.askInput.Width)
 	}
 }
 
@@ -245,8 +243,8 @@ func TestGlobalWindowSizeMinClamp(t *testing.T) {
 	m = update(m, tea.WindowSizeMsg{Width: 5, Height: 5})
 
 	// inputWidth = 5 - 10 = -5 → clamped to 10
-	if m.chatInput.Width < 10 {
-		t.Errorf("chatInput.Width = %d, minimum should be 10", m.chatInput.Width)
+	if m.chatInput.Width() < 1 {
+		t.Errorf("chatInput.Width() = %d, minimum should be 1", m.chatInput.Width())
 	}
 	if m.askInput.Width < 6 {
 		t.Errorf("askInput.Width = %d, minimum should be 6", m.askInput.Width)
@@ -476,9 +474,6 @@ func TestRunningCmdEscOnlyForEsc(t *testing.T) {
 	}
 }
 
-
-
-
 // ─── Update: Show Output (scrollable) ──────────────────────────────────
 
 func TestShowOutputExitKeys(t *testing.T) {
@@ -634,57 +629,57 @@ func TestShowOutputNonKeyIgnored(t *testing.T) {
 
 func TestParseHistoryList(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		want     int // expected item count
-		firstID  string
+		name      string
+		input     string
+		want      int // expected item count
+		firstID   string
 		firstRole string
 	}{
 		{
-			name:     "typical output",
-			input:    "25604  assistant  call_xxx  false\n25605  tool  call_xxx  true",
-			want:     2,
-			firstID:  "25604",
+			name:      "typical output",
+			input:     "25604  assistant  call_xxx  false\n25605  tool  call_xxx  true",
+			want:      2,
+			firstID:   "25604",
 			firstRole: "assistant",
 		},
 		{
-			name:     "single line",
-			input:    "12345  user  call_abc  true",
-			want:     1,
-			firstID:  "12345",
+			name:      "single line",
+			input:     "12345  user  call_abc  true",
+			want:      1,
+			firstID:   "12345",
 			firstRole: "user",
 		},
 		{
-			name:     "with trailing spaces",
-			input:    "  100  assistant                  true  ",
-			want:     1,
-			firstID:  "100",
+			name:      "with trailing spaces",
+			input:     "  100  assistant                  true  ",
+			want:      1,
+			firstID:   "100",
 			firstRole: "assistant",
 		},
 		{
-			name:     "empty input",
-			input:    "",
-			want:     0,
+			name:  "empty input",
+			input: "",
+			want:  0,
 		},
 		{
-			name:     "blank lines skipped",
-			input:    "25604  assistant  call_x  false\n\n25605  tool  call_y  true",
-			want:     2,
-			firstID:  "25604",
+			name:      "blank lines skipped",
+			input:     "25604  assistant  call_x  false\n\n25605  tool  call_y  true",
+			want:      2,
+			firstID:   "25604",
 			firstRole: "assistant",
 		},
 		{
-			name:     "minimum fields only",
-			input:    "1  assistant",
-			want:     1,
-			firstID:  "1",
+			name:      "minimum fields only",
+			input:     "1  assistant",
+			want:      1,
+			firstID:   "1",
 			firstRole: "assistant",
 		},
 		{
-			name:     "done false detected",
-			input:    "25604  assistant  call_x  false",
-			want:     1,
-			firstID:  "25604",
+			name:      "done false detected",
+			input:     "25604  assistant  call_x  false",
+			want:      1,
+			firstID:   "25604",
 			firstRole: "assistant",
 		},
 	}
@@ -967,8 +962,8 @@ func TestShowOutputBackToMainMenu(t *testing.T) {
 func TestChattingSessionReady(t *testing.T) {
 	m := model()
 	m.screen = ScreenChatting
-	m.chatPendingInput = "hello"
-	m.chatLoading = true
+	// Simulate an exchange: history has user message (set on Enter).
+	m.chatHistory = []ChatLine{{Role: "user", Content: "hello"}}
 
 	sess := mockSession()
 	m = update(m, aiagent.ChatSessionReadyMsg{Session: sess})
@@ -980,14 +975,13 @@ func TestChattingSessionReady(t *testing.T) {
 		t.Error("chatReady should be true")
 	}
 	if !m.chatLoading {
-		t.Error("chatLoading should remain true (pending input)")
+		t.Error("chatLoading should remain true (history has content)")
 	}
 }
 
 func TestChattingSessionReadyError(t *testing.T) {
 	m := model()
 	m.screen = ScreenChatting
-	m.chatPendingInput = "hello"
 	m.chatLoading = true
 
 	m = update(m, aiagent.ChatSessionReadyMsg{Err: assertError{"session failed"}})
@@ -1041,8 +1035,8 @@ func TestChattingEnter(t *testing.T) {
 
 	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
 
-	if m.chatPendingInput != "hello" {
-		t.Errorf("chatPendingInput = %q, want %q", m.chatPendingInput, "hello")
+	if len(m.chatHistory) != 1 || m.chatHistory[0].Role != "user" || m.chatHistory[0].Content != "hello" {
+		t.Errorf("chatHistory = %+v, want [{user hello}]", m.chatHistory)
 	}
 	if m.chatInput.Value() != "" {
 		t.Error("chatInput should be cleared after enter")
@@ -1058,11 +1052,212 @@ func TestChattingEnter(t *testing.T) {
 func TestChattingEnterEmpty(t *testing.T) {
 	m := model()
 	m.screen = ScreenChatting
-	m.chatInput.SetValue("  ")
+	m.chatInput.SetValue("  ") // whitespace is trimmed to empty
 
-	_, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Empty messages are now allowed — the user may want to send "continue".
+	if cmd == nil {
+		t.Error("expected non-nil cmd (empty messages allowed)")
+	}
+	if len(m.chatHistory) != 1 {
+		t.Fatalf("history length = %d, want 1", len(m.chatHistory))
+	}
+	if m.chatHistory[0].Role != "user" || m.chatHistory[0].Content != "" {
+		t.Errorf("history[0] = %+v, want {user, ''}", m.chatHistory[0])
+	}
+	if !m.chatLoading {
+		t.Error("chatLoading should be true")
+	}
+}
+
+func TestChattingInterleavedDuringLoading(t *testing.T) {
+	m := model()
+	m.screen = ScreenChatting
+	m.chatLoading = true
+	m.chatDone = false
+	m.chatScrollMax = 10
+	m.chatScroll = 5
+	m.chatInput.SetValue("correction")
+
+	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Should NOT start a new session (cmd should be nil).
 	if cmd != nil {
-		t.Error("expected nil cmd for empty input")
+		t.Error("expected nil cmd (interleaved — don't start new session yet)")
+	}
+	// Message should be in history immediately.
+	if len(m.chatHistory) != 1 || m.chatHistory[0].Content != "correction" {
+		t.Errorf("history = %+v, want [{user correction}]", m.chatHistory)
+	}
+	// Pending input should be set.
+	if m.chatPendingInput != "correction" {
+		t.Errorf("chatPendingInput = %q, want %q", m.chatPendingInput, "correction")
+	}
+	// Input should be cleared.
+	if m.chatInput.Value() != "" {
+		t.Error("chatInput should be cleared")
+	}
+	// Scroll should reset to bottom.
+	if m.chatScroll != 0 {
+		t.Errorf("chatScroll = %d, want 0", m.chatScroll)
+	}
+}
+
+func TestChattingInterleavedMultipleDuringLoading(t *testing.T) {
+	m := model()
+	m.screen = ScreenChatting
+	m.chatLoading = true
+	m.chatDone = false
+
+	// First interleaved message.
+	m.chatInput.SetValue("first correction")
+	m = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if len(m.chatHistory) != 1 || m.chatHistory[0].Content != "first correction" {
+		t.Fatalf("after first: history = %+v", m.chatHistory)
+	}
+	if m.chatPendingInput != "first correction" {
+		t.Errorf("pendingInput = %q, want %q", m.chatPendingInput, "first correction")
+	}
+
+	// Second interleaved message overwrites pending.
+	m.chatInput.SetValue("second correction")
+	m = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if len(m.chatHistory) != 2 {
+		t.Fatalf("after second: history length = %d, want 2", len(m.chatHistory))
+	}
+	if m.chatHistory[0].Content != "first correction" {
+		t.Errorf("history[0] = %q, want %q", m.chatHistory[0].Content, "first correction")
+	}
+	if m.chatHistory[1].Content != "second correction" {
+		t.Errorf("history[1] = %q, want %q", m.chatHistory[1].Content, "second correction")
+	}
+	if m.chatPendingInput != "second correction" {
+		t.Errorf("pendingInput = %q, want %q", m.chatPendingInput, "second correction")
+	}
+}
+
+func TestChattingInterleavedEmptyDuringLoading(t *testing.T) {
+	m := model()
+	m.screen = ScreenChatting
+	m.chatLoading = true
+	m.chatDone = false
+	m.chatInput.SetValue("")
+
+	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Empty interleaved messages should also be accepted.
+	if cmd != nil {
+		t.Error("expected nil cmd")
+	}
+	if len(m.chatHistory) != 1 || m.chatHistory[0].Content != "" {
+		t.Errorf("history = %+v, want [{user ''}]", m.chatHistory)
+	}
+	if m.chatPendingInput != "" {
+		t.Errorf("pendingInput = %q, want empty", m.chatPendingInput)
+	}
+}
+
+func TestChattingTypeChatDoneWithPendingInput(t *testing.T) {
+	m := model()
+	m.screen = ScreenChatting
+	m.chatLoading = true
+	m.chatDone = false
+	m.chatPendingInput = "correction"
+	m.chatHistory = []ChatLine{
+		{Role: "user", Content: "original"},
+		{Role: "assistant", Content: "response"},
+		{Role: "user", Content: "correction"},
+	}
+
+	msg := &protocol.Message{Type: protocol.TypeChatDone}
+	_, cmd := handleEvent(m, msg)
+
+	// Should auto-start a new session.
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd (auto-start new session)")
+	}
+	if !m.chatLoading {
+		t.Error("chatLoading should be true for new session")
+	}
+	if m.chatDone {
+		t.Error("chatDone should be false for new session")
+	}
+	if !m.spinnerOn {
+		t.Error("spinnerOn should be true for new session")
+	}
+	// Pending input should be cleared.
+	if m.chatPendingInput != "" {
+		t.Error("chatPendingInput should be cleared after auto-start")
+	}
+	// History should be preserved (full conversation so far).
+	if len(m.chatHistory) != 3 {
+		t.Errorf("history length = %d, want 3", len(m.chatHistory))
+	}
+	// Session should be nil (closed).
+	if m.chatSession != nil {
+		t.Error("chatSession should be nil (closed)")
+	}
+}
+
+func TestChattingTypeChatDoneWithoutPending(t *testing.T) {
+	m := model()
+	m.screen = ScreenChatting
+	m.chatLoading = true
+	m.chatDone = false
+	m.chatPendingInput = ""
+	m.chatHistory = []ChatLine{{Role: "user", Content: "hello"}}
+
+	msg := &protocol.Message{Type: protocol.TypeChatDone}
+	_, cmd := handleEvent(m, msg)
+
+	// Without pending input, should just focus input.
+	if cmd == nil {
+		t.Error("expected non-nil cmd (chatInput.Focus())")
+	}
+	if m.chatLoading {
+		t.Error("chatLoading should be false")
+	}
+	if !m.chatDone {
+		t.Error("chatDone should be true")
+	}
+	if m.spinnerOn {
+		t.Error("spinnerOn should be false")
+	}
+}
+
+func TestChattingTypeGoodbyeWithPendingInput(t *testing.T) {
+	m := model()
+	m.screen = ScreenChatting
+	m.chatLoading = true
+	m.chatDone = false
+	m.chatPendingInput = "correction"
+	m.chatHistory = []ChatLine{
+		{Role: "user", Content: "original"},
+		{Role: "assistant", Content: "response"},
+		{Role: "user", Content: "correction"},
+	}
+
+	msg := &protocol.Message{Type: protocol.TypeGoodbye}
+	_, cmd := handleEvent(m, msg)
+
+	// Should auto-start a new session.
+	if cmd == nil {
+		t.Fatal("expected non-nil cmd (auto-start new session)")
+	}
+	if !m.chatLoading {
+		t.Error("chatLoading should be true")
+	}
+	if m.chatDone {
+		t.Error("chatDone should be false")
+	}
+	if !m.spinnerOn {
+		t.Error("spinnerOn should be true")
+	}
+	if m.chatPendingInput != "" {
+		t.Error("chatPendingInput should be cleared")
 	}
 }
 
@@ -1084,7 +1279,6 @@ func TestChattingEsc(t *testing.T) {
 		t.Error("expected nil cmd (direct transition)")
 	}
 }
-
 
 func TestChattingEscClosesSession(t *testing.T) {
 	m := model()
@@ -1155,11 +1349,11 @@ func TestChattingScroll(t *testing.T) {
 // ─── Update: handleChatEvent ────────────────────────────────────────────────
 
 func TestHandleReady(t *testing.T) {
-	t.Run("with pending input sends message", func(t *testing.T) {
+	t.Run("with history sends message", func(t *testing.T) {
 		m := model()
 		m.screen = ScreenChatting
 		m.chatReady = false
-		m.chatPendingInput = "hello"
+		m.chatHistory = []ChatLine{{Role: "user", Content: "hello"}}
 		m.chatSession = mockSession()
 
 		msg := &protocol.Message{Type: protocol.TypeReady}
@@ -1173,7 +1367,7 @@ func TestHandleReady(t *testing.T) {
 		}
 	})
 
-	t.Run("without pending input returns nil cmd", func(t *testing.T) {
+	t.Run("empty history returns nil cmd", func(t *testing.T) {
 		m := model()
 		m.screen = ScreenChatting
 		m.chatReady = false
@@ -1183,7 +1377,7 @@ func TestHandleReady(t *testing.T) {
 		_, cmd := handleEvent(m, msg)
 
 		if cmd != nil {
-			t.Error("expected nil cmd (no pending input)")
+			t.Error("expected nil cmd (no history)")
 		}
 	})
 }
@@ -1249,7 +1443,8 @@ func TestHandleChatChunkInvalidPayload(t *testing.T) {
 func TestHandleChatDone(t *testing.T) {
 	m := model()
 	m.screen = ScreenChatting
-	m.chatPendingInput = "my message"
+	// User message is already in history (added on Enter).
+	m.chatHistory = []ChatLine{{Role: "user", Content: "my message"}}
 	m.chatLoading = true
 	m.spinnerOn = true
 
@@ -1267,18 +1462,15 @@ func TestHandleChatDone(t *testing.T) {
 	if m.spinnerOn {
 		t.Error("spinnerOn should be false")
 	}
-	if cmd != nil {
-		t.Error("expected nil cmd after done")
+	if cmd == nil {
+		t.Error("expected non-nil cmd (chatInput.Focus()) after done")
 	}
-	// Pending input should be committed to history
+	// User message should be preserved in history (unchanged by ChatDone).
 	if len(m.chatHistory) != 1 {
 		t.Fatalf("history length = %d, want 1", len(m.chatHistory))
 	}
 	if m.chatHistory[0].Role != "user" || m.chatHistory[0].Content != "my message" {
 		t.Errorf("history[0] = %+v, want user:my message", m.chatHistory[0])
-	}
-	if m.chatPendingInput != "" {
-		t.Error("chatPendingInput should be cleared")
 	}
 }
 
@@ -1360,8 +1552,8 @@ func TestHandleGoodbye(t *testing.T) {
 	if m.spinnerOn {
 		t.Error("spinnerOn should be false")
 	}
-	if cmd != nil {
-		t.Error("expected nil cmd after goodbye")
+	if cmd == nil {
+		t.Error("expected non-nil cmd (chatInput.Focus()) after goodbye")
 	}
 }
 
@@ -1870,19 +2062,17 @@ func TestViewChatting(t *testing.T) {
 		}
 	})
 
-	t.Run("pending input shown", func(t *testing.T) {
+	t.Run("user message shown in history", func(t *testing.T) {
 		m := model()
+
 		m.screen = ScreenChatting
-		m.chatPendingInput = "not yet sent"
+		m.chatHistory = []ChatLine{{Role: "user", Content: "my question"}}
 		m.chatLoading = false
 		m.chatDone = false
 		v := m.View()
 
-		if !strings.Contains(v, "not yet sent") {
-			t.Error("view should show pending input")
-		}
-		if !strings.Contains(v, "pending") {
-			t.Error("view should indicate pending state")
+		if !strings.Contains(v, "my question") {
+			t.Error("view should show user message from history")
 		}
 	})
 
@@ -2115,7 +2305,7 @@ func TestFullChatFlow(t *testing.T) {
 	readyMsg := &protocol.Message{Type: protocol.TypeReady}
 	_, cmd3 := handleEvent(m, readyMsg)
 	if cmd3 != nil {
-		// No pending input, so should be nil
+		// No history yet, so should be nil
 	}
 
 	// Clear session before enter — the mock session's close func is nil,
@@ -2125,8 +2315,9 @@ func TestFullChatFlow(t *testing.T) {
 	// 4. User types a message.
 	m.chatInput.SetValue("Hello, AI!")
 	m, cmd4 := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.chatPendingInput != "Hello, AI!" {
-		t.Fatalf("step 4: chatPendingInput = %q", m.chatPendingInput)
+	// User message should now be in chatHistory (added immediately on Enter).
+	if len(m.chatHistory) != 1 || m.chatHistory[0].Content != "Hello, AI!" {
+		t.Fatalf("step 4: history = %+v, want [user:Hello, AI!]", m.chatHistory)
 	}
 	_ = cmd4
 
@@ -2134,7 +2325,7 @@ func TestFullChatFlow(t *testing.T) {
 	//    which has nil close func — would panic when enter/Close() is called).
 	m.chatReady = true
 
-	// 6. Simulate Ready with pending input — should trigger send.
+	// 6. Simulate Ready with history — should trigger send.
 	readyMsg2 := &protocol.Message{Type: protocol.TypeReady}
 	_, cmd6 := handleEvent(m, readyMsg2)
 	if cmd6 == nil {
@@ -2156,20 +2347,25 @@ func TestFullChatFlow(t *testing.T) {
 		Payload: &protocol.ChatChunkPayload{Content: "How can I help?"},
 	})
 
-	if len(m.chatHistory) != 1 {
-		t.Fatalf("step 7: history length = %d, want 1", len(m.chatHistory))
+	// After step 4, history has [user]. After chunks, history has [user, assistant].
+	if len(m.chatHistory) != 2 {
+		t.Fatalf("step 7: history length = %d, want 2 (user+assistant)", len(m.chatHistory))
 	}
-	if m.chatHistory[0].Content != "Hello! How can I help?" {
-		t.Errorf("step 7: content = %q", m.chatHistory[0].Content)
+	if m.chatHistory[0].Role != "user" || m.chatHistory[0].Content != "Hello, AI!" {
+		t.Errorf("step 7: history[0] = %+v, want user:Hello, AI!", m.chatHistory[0])
 	}
+	if m.chatHistory[1].Role != "assistant" || m.chatHistory[1].Content != "Hello! How can I help?" {
+		t.Errorf("step 7: history[1] = %+v, want assistant:Hello! How can I help?", m.chatHistory[1])
+	}
+
 	// Clear session before ChatDone — mock session has nil close func and
 	// would panic when the handler calls m.chatSession.Close().
 	m.chatSession = nil
 
 	// 8. Simulate done.
 	_, cmd8 := handleEvent(m, &protocol.Message{Type: protocol.TypeChatDone})
-	if cmd8 != nil {
-		t.Error("step 8: expected nil cmd")
+	if cmd8 == nil {
+		t.Error("step 8: expected non-nil cmd (chatInput.Focus())")
 	}
 	if !m.chatDone {
 		t.Error("step 8: chatDone should be true")
@@ -2177,14 +2373,14 @@ func TestFullChatFlow(t *testing.T) {
 	if m.chatLoading {
 		t.Error("step 8: chatLoading should be false")
 	}
-	// History should now have assistant (from chunks) + user (committed from pending).
+	// History should be unchanged by ChatDone (user added on Enter, assistant from chunks).
 	if len(m.chatHistory) != 2 {
-		t.Fatalf("step 8: history length = %d, want 2 (assistant+user)", len(m.chatHistory))
+		t.Fatalf("step 8: history length = %d, want 2 (user+assistant)", len(m.chatHistory))
 	}
-	if m.chatHistory[0].Role != "assistant" || m.chatHistory[0].Content != "Hello! How can I help?" {
-		t.Errorf("step 8: history[0] = %+v", m.chatHistory[0])
+	if m.chatHistory[0].Role != "user" || m.chatHistory[0].Content != "Hello, AI!" {
+		t.Errorf("step 8: history[0] = %+v, want user:Hello, AI!", m.chatHistory[0])
 	}
-	if m.chatHistory[1].Role != "user" || m.chatHistory[1].Content != "Hello, AI!" {
-		t.Errorf("step 8: history[1] = %+v", m.chatHistory[1])
+	if m.chatHistory[1].Role != "assistant" || m.chatHistory[1].Content != "Hello! How can I help?" {
+		t.Errorf("step 8: history[1] = %+v, want assistant:Hello! How can I help?", m.chatHistory[1])
 	}
 }

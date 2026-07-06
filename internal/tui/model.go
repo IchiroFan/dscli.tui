@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -40,7 +41,7 @@ const (
 	ScreenQuitting
 )
 
-// ─── MenuItem ────────────────────────────────────────────────────────
+// ─── MenuItem ───────────────────────────────────────────────────────
 
 // MenuItem describes one entry in the main command palette.
 type MenuItem struct {
@@ -48,7 +49,7 @@ type MenuItem struct {
 	Desc  string // one-line description
 }
 
-// ─── ChatLine ────────────────────────────────────────────────────────
+// ─── ChatLine ───────────────────────────────────────────────────────
 
 // ChatLine is a single message in the chat history, stored client-side.
 type ChatLine struct {
@@ -56,7 +57,7 @@ type ChatLine struct {
 	Content string
 }
 
-// ─── HistoryItem ───────────────────────────────────────────────────
+// ─── HistoryItem ──────────────────────────────────────────────────
 
 // HistoryItem represents one entry in the dscli history list.
 type HistoryItem struct {
@@ -126,7 +127,7 @@ type RootModel struct {
 
 	// ── Chat
 	chatHistory      []ChatLine           // accumulated conversation
-	chatInput        textinput.Model      // chat message input
+	chatInput        textarea.Model       // multi-line chat message input
 	chatLoading      bool                 // true while waiting for AI response
 	chatSession      *aiagent.ChatSession // active session (one per exchange)
 	chatDone         bool                 // true when the current exchange is done
@@ -175,12 +176,25 @@ var defaultMenuItems = []MenuItem{
 
 // New creates a new RootModel with the given agent.
 func New(agent aiagent.AIAgent) *RootModel {
-	chatInput := textinput.New()
-	chatInput.Placeholder = "Type your message..."
-	chatInput.Focus()
-	chatInput.CharLimit = 0 // no limit
-	chatInput.Width = 40    // placeholder, resized on WindowSizeMsg
+	// ── Multi-line chat input (textarea) ──────────────────────────
+	ta := textarea.New()
+	ta.Placeholder = "Type your message... (Ctrl+J ↵)"
+	ta.ShowLineNumbers = false
+	ta.Prompt = ""
+	ta.CharLimit = 0       // no limit
+	ta.SetHeight(3)        // fixed 3-line input area
+	ta.MaxHeight = 10      // max 10 lines before internal scroll
 
+	// Enter → send, Ctrl+J → newline (Shift+Enter works on some terminals)
+	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "ctrl+j")
+
+	// Style: blue border when focused, muted border when blurred
+	ta.FocusedStyle.Base = ChatInputBaseStyle(true)
+	ta.BlurredStyle.Base = ChatInputBaseStyle(false)
+
+	ta.Focus() // focus for text input; ignore cursor cmd
+
+	// ── AskUser single-line input ─────────────────────────────────
 	askInput := textinput.New()
 	askInput.Placeholder = "Type your answer..."
 	askInput.Focus()
@@ -200,7 +214,7 @@ func New(agent aiagent.AIAgent) *RootModel {
 		modelName:    "deepseek-chat",
 		menuItems:    defaultMenuItems,
 		menuCursor:   0,
-		chatInput:    chatInput,
+		chatInput:    ta,
 		askInput:     askInput,
 		spinner:      sp,
 	}

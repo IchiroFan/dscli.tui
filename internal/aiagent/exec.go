@@ -198,18 +198,22 @@ func (a *execAgent) execDS(ctx context.Context, args ...string) (*protocol.Comma
 // NewChatSession starts a dscli chat subprocess and returns a ChatSession
 // for one-shot exchange (one user message → one response).
 //
-// Temporarily uses plain-text mode (no --json-line) since dscli doesn't
-// yet support the JSON-line protocol.  When --json-line is implemented,
-// this should switch to the JSON-line codec for streaming and AskUser support.
+// Uses --stream mode for real-time output: each SSE chunk from the DeepSeek
+// API is written to stdout by dscli and forwarded as a ChatChunkPayload event.
+// The goroutine reads stdout byte-by-byte and emits events on newline or
+// 80-byte boundaries for smooth real-time display without overwhelming the UI.
 //
 // Flow per exchange:
 //  1. Emit TypeReady immediately (session starts ready).
 //  2. Wait for ChatRequestPayload from TUI.
 //  3. Write the user message to the process stdin and close stdin.
-//  4. Read all stdout until process exits.
-//  5. Emit ChatChunkPayload with the captured text, then ChatDonePayload.
+//  4. Read stdout progressively, emitting ChatChunkPayload for each chunk.
+//  5. On EOF, emit ChatDonePayload.
 func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions) (*ChatSession, error) {
 	args := []string{"chat"}
+	if opts.Stream {
+		args = append(args, "--stream")
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -241,6 +245,10 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 	done := make(chan struct{})
 
 	// Single goroutine: handles the full exchange lifecycle.
+	// Note: we NEVER call cmd.Wait() here — that's Close()'s responsibility.
+	// Calling cmd.Wait() from both the goroutine AND Close() creates a race
+	// condition (Go exec.Cmd.Wait is not safe for concurrent use) that can
+	// deadlock, freezing the TUI update loop.
 	go func() {
 		defer close(events)
 		defer close(done)
@@ -253,13 +261,11 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 		case msg, ok := <-sendCh:
 			if !ok {
 				stdin.Close()
-				cmd.Wait()
 				return
 			}
 			p, ok := msg.Payload.(*protocol.ChatRequestPayload)
 			if !ok || len(p.Messages) == 0 {
 				stdin.Close()
-				cmd.Wait()
 				return
 			}
 			// Find the last user message.
@@ -272,7 +278,6 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 			}
 			if userMsg == "" {
 				stdin.Close()
-				cmd.Wait()
 				return
 			}
 
@@ -281,38 +286,42 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 			io.WriteString(stdin, userMsg+"\n")
 			stdin.Close()
 
-			// 4. Read all stdout output.
-			var respBuilder strings.Builder
+			// 4. Read stdout progressively, emitting chunks in real-time.
+			//    Uses byte-by-byte reading with newline or 80-byte boundaries
+			//    so the UI updates smoothly during streaming.
+			var chunkBuf strings.Builder
 			reader := bufio.NewReader(stdout)
 			for {
-				line, err := reader.ReadString('\n')
+				b, err := reader.ReadByte()
 				if err != nil {
-					if line != "" {
-						respBuilder.WriteString(line)
+					// Emit any remaining content before EOF.
+					if chunkBuf.Len() > 0 {
+						events <- &protocol.Message{
+							Type:    protocol.TypeChatChunk,
+							Payload: &protocol.ChatChunkPayload{Content: chunkBuf.String()},
+						}
 					}
 					break
 				}
-				respBuilder.WriteString(line)
-			}
-
-			// 5. Emit ChatChunk with the full response text, then ChatDone.
-			response := respBuilder.String()
-			if response != "" {
-				events <- &protocol.Message{
-					Type:    protocol.TypeChatChunk,
-					Payload: &protocol.ChatChunkPayload{Content: response},
+				chunkBuf.WriteByte(b)
+				// Emit on newlines (natural paragraph breaks) or every 80 bytes
+				// (for long code lines without newlines).
+				if b == '\n' || chunkBuf.Len() >= 80 {
+					events <- &protocol.Message{
+						Type:    protocol.TypeChatChunk,
+						Payload: &protocol.ChatChunkPayload{Content: chunkBuf.String()},
+					}
+					chunkBuf.Reset()
 				}
 			}
+
+			// 5. Emit ChatDone signal.
 			events <- &protocol.Message{Type: protocol.TypeChatDone}
 
 		case <-ctx.Done():
 			stdin.Close()
-			cmd.Wait()
 			return
 		}
-
-		// Wait for the process to fully exit before the goroutine ends.
-		cmd.Wait()
 	}()
 
 	return &ChatSession{
@@ -325,6 +334,8 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 		},
 	}, nil
 }
+
+
 
 // ── Close ───────────────────────────────────────────────────
 

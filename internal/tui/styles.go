@@ -74,6 +74,10 @@ var (
 				Bold(true).
 				PaddingLeft(1)
 
+	// MenuDescStyle for the inline description text (same line, dim).
+	MenuDescStyle = lipgloss.NewStyle().
+			Foreground(colorSubtext)
+
 	// TitleStyle for section titles within a screen.
 	TitleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -152,14 +156,6 @@ var (
 // ─── Chat Styles ────────────────────────────────────────────────────────────
 
 var (
-	// ChatInputStyle for the chat input field border.
-	ChatInputStyle = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(colorPrimary).
-			Foreground(colorText).
-			Padding(0, 1).
-			MarginTop(1)
-
 	// ChatLoadingStyle for the "AI is thinking..." indicator.
 	ChatLoadingStyle = lipgloss.NewStyle().
 				Foreground(colorSubtext).
@@ -428,4 +424,18 @@ func ShortenPath(p string) string {
 // ModelDisplayName returns the currently configured chat model name.
 func ModelDisplayName() string {
 	return "deepseek-chat"
+}
+
+// ChatInputBaseStyle returns the base style for the chat textarea border.
+// focused=true uses the primary blue border; focused=false uses a muted overlay.
+func ChatInputBaseStyle(focused bool) lipgloss.Style {
+	borderColor := colorPrimary
+	if !focused {
+		borderColor = colorOverlay
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(borderColor).
+		Foreground(colorText).
+		Padding(0, 1)
 }

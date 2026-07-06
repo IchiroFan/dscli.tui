@@ -20,12 +20,12 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width
 		m.Height = msg.Height
-		// Resize text inputs proportionally.
+		// Resize chat/input widgets proportionally.
 		inputWidth := msg.Width - 10
 		if inputWidth < 10 {
 			inputWidth = 10
 		}
-		m.chatInput.Width = inputWidth
+		m.chatInput.SetWidth(inputWidth)
 		m.askInput.Width = inputWidth - 4
 		return m, nil
 
@@ -121,6 +121,8 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 		m.chatReady = false
 		m.chatDone = false
 		m.chatScroll = 0
+		m.chatScrollMax = 0
+		m.chatPendingInput = ""
 		return m, cmdStartChat(m.agent, nil)
 
 	case 1: // Balance
@@ -399,8 +401,6 @@ func (m *RootModel) updateShowOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-
-
 // ─── Chatting ────────────────────────────────────────────────────────
 
 func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -414,12 +414,13 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.chatSession = msg.Session
 		m.chatReady = true
-		m.chatLoading = (m.chatPendingInput != "")
+		// Keep chatLoading: true if history has content (exchange in progress),
+		// false for initial session creation (no pending message).
+		m.chatLoading = len(m.chatHistory) > 0
 		// Start reading events from the session.  The first event will be
 		// TypeReady (emitted by the session immediately after creation),
 		// which triggers handleChatEvent → cmdSendChatMessage → event loop.
 		return m, cmdWaitChatEvent(msg.Session)
-
 
 	// ── Chat event (chunk, ask_user, done) ───────────────────────
 	case aiagent.ChatEventMsg:
@@ -439,11 +440,55 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ── Keyboard input ───────────────────────────────────────────
 	case tea.KeyMsg:
-		// If loading (AI responding), ignore input except for AskUser.
+		// During loading (AI responding), block Enter but allow
+		// navigation and text input so the UI doesn't feel frozen.
 		if m.chatLoading && !m.chatDone {
-			return m, nil
+			switch msg.String() {
+			case "esc":
+				// Exit chat even during loading.
+				if m.chatSession != nil {
+					m.chatSession.Close() //nolint:errcheck
+					m.chatSession = nil
+				}
+				m.screen = ScreenMainMenu
+				m.err = nil
+				return m, nil
+			case "enter":
+				// Interleaved chat (插入对话): user can type while AI is responding.
+				// The message is added to history immediately and auto-sent when
+				// the current response finishes (see TypeChatDone / TypeGoodbye).
+				input := strings.TrimSpace(m.chatInput.Value())
+				m.chatHistory = append(m.chatHistory, ChatLine{Role: "user", Content: input})
+				m.chatPendingInput = input
+				m.chatInput.SetValue("")
+				m.chatScroll = 0
+				return m, nil
+			case "pgup", "shift+up":
+				if m.chatScroll < m.chatScrollMax {
+					m.chatScroll++
+				}
+				return m, nil
+			case "pgdown", "shift+down":
+				if m.chatScroll > 0 {
+					m.chatScroll--
+				}
+				return m, nil
+			case "ctrl+up":
+				if m.chatScroll < m.chatScrollMax {
+					m.chatScroll++
+				}
+				return m, nil
+			case "ctrl+down":
+				if m.chatScroll > 0 {
+					m.chatScroll--
+				}
+				return m, nil
+			default:
+				// Fall through to route text keys to chat input.
+			}
 		}
 
+		// ── After-loading keyboard handling ──────────────────────────
 		switch msg.String() {
 		case "esc":
 			// Close session and return to menu — direct transition.
@@ -454,16 +499,14 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenMainMenu
 			m.err = nil
 			return m, nil
-
-
 		case "enter":
 			input := strings.TrimSpace(m.chatInput.Value())
-			if input == "" {
-				return m, nil
-			}
+			// Allow empty messages — user may want to send "continue" signal.
+			// The interleaved chat case (during loading) is handled above.
 
-			// Save pending input (will be added to history on Done).
-			m.chatPendingInput = input
+			// Add user message to chat history immediately so it appears
+			// in the view while the AI is responding.
+			m.chatHistory = append(m.chatHistory, ChatLine{Role: "user", Content: input})
 			m.chatInput.SetValue("")
 			m.chatInput.Blur()
 			m.chatLoading = true
@@ -490,6 +533,18 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.chatScroll--
 			}
 			return m, nil
+
+		case "ctrl+up":
+			if m.chatScroll < m.chatScrollMax {
+				m.chatScroll++
+			}
+			return m, nil
+
+		case "ctrl+down":
+			if m.chatScroll > 0 {
+				m.chatScroll--
+			}
+			return m, nil
 		}
 
 		// Route remaining key messages to the textinput.
@@ -509,13 +564,13 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case protocol.TypeReady:
-		// dscli is ready. Send the chat request now.
+		// dscli is ready. Send the chat request with the accumulated history
+		// (the user message was already added on Enter).
 		m.chatReady = true
-		pending := m.chatPendingInput
-		if pending == "" {
-			return m, nil // nothing to send (shouldn't happen)
+		if len(m.chatHistory) == 0 {
+			return m, nil // nothing to send (initial session creation)
 		}
-		return m, cmdSendChatMessage(m.chatSession, m.chatHistory, pending)
+		return m, cmdSendChatMessage(m.chatSession, m.chatHistory)
 
 	case protocol.TypeChatChunk:
 		p, ok := msg.Payload.(*protocol.ChatChunkPayload)
@@ -530,21 +585,27 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 		m.chatLoading = false
 		m.chatDone = true
 		m.spinnerOn = false
-		m.chatInput.Focus()
-
-		// Commit the exchange to permanent chat history.
-		if m.chatPendingInput != "" {
-			m.chatHistory = append(m.chatHistory,
-				ChatLine{Role: "user", Content: m.chatPendingInput})
-			m.chatPendingInput = ""
-		}
 
 		// Close the session process.
 		if m.chatSession != nil {
 			m.chatSession.Close() //nolint:errcheck
 			m.chatSession = nil
 		}
-		return m, nil
+
+		// Interleaved chat (插入对话): if user queued a message while AI was
+		// responding, automatically start a new exchange so the correction
+		// reaches the AI without an extra Enter press from the user.
+		if m.chatPendingInput != "" {
+			m.chatPendingInput = ""
+			m.chatLoading = true
+			m.chatDone = false
+			m.spinnerOn = true
+			m.chatInput.Blur()
+			return m, cmdStartChat(m.agent, m.chatHistory)
+		}
+
+		focusCmd := m.chatInput.Focus()
+		return m, focusCmd
 
 	case protocol.TypeAskUser:
 		p, ok := msg.Payload.(*protocol.AskUserPayload)
@@ -572,12 +633,24 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 		m.chatLoading = false
 		m.chatDone = true
 		m.spinnerOn = false
-		m.chatInput.Focus()
+
 		if m.chatSession != nil {
 			m.chatSession.Close() //nolint:errcheck
 			m.chatSession = nil
 		}
-		return m, nil
+
+		// Interleaved chat: auto-send pending message.
+		if m.chatPendingInput != "" {
+			m.chatPendingInput = ""
+			m.chatLoading = true
+			m.chatDone = false
+			m.spinnerOn = true
+			m.chatInput.Blur()
+			return m, cmdStartChat(m.agent, m.chatHistory)
+		}
+
+		focusCmd := m.chatInput.Focus()
+		return m, focusCmd
 
 	default:
 		return m, m.waitForMoreChatEvents()

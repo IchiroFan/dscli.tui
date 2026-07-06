@@ -149,13 +149,13 @@ func (m *RootModel) viewMainMenu() string {
 	b.WriteString("\n")
 
 	for i, item := range m.menuItems {
+		titleStyle := MenuItemStyle
 		if i == m.menuCursor {
-			b.WriteString(MenuSelectedStyle.Render("▸ " + item.Title))
-			b.WriteString("  ")
-			b.WriteString(HelpStyle.Render("— " + item.Desc))
-		} else {
-			b.WriteString(MenuItemStyle.Render("  " + item.Title))
+			titleStyle = MenuSelectedStyle
 		}
+		b.WriteString(titleStyle.Render(item.Title))
+		b.WriteString("  ")
+		b.WriteString(MenuDescStyle.Render("— " + item.Desc))
 		b.WriteString("\n")
 	}
 
@@ -376,10 +376,15 @@ func (m *RootModel) viewChatting() string {
 		switch line.Role {
 		case "user":
 			rendered = RenderBubble(UserBubbleBase, "👤 ", line.Content, wrapStyle, contentAreaW)
-			// Right-align user bubbles.
+			// Right-align user bubbles: pad each line individually so that
+			// wrapped multi-line bubbles stay aligned (not just the first line).
 			lw := lipgloss.Width(rendered)
 			if pad := contentW - lw; pad > 0 {
-				rendered = strings.Repeat(" ", pad) + rendered
+				lines := strings.Split(rendered, "\n")
+				for i, l := range lines {
+					lines[i] = strings.Repeat(" ", pad) + l
+				}
+				rendered = strings.Join(lines, "\n")
 			}
 		case "assistant":
 			rendered = RenderBubble(AssistantBubbleBase, "🧠 ", line.Content, wrapStyle, contentAreaW)
@@ -391,18 +396,9 @@ func (m *RootModel) viewChatting() string {
 		renderedBubbles = append(renderedBubbles, rendered)
 	}
 
-	// Pending user input (not yet committed to history).
-	if m.chatPendingInput != "" && !m.chatLoading && !m.chatDone {
-		pendingContent := m.chatPendingInput + " " + HelpStyle.Render("(pending...)")
-		rendered := RenderBubble(UserBubbleBase, "👤 ", pendingContent, wrapStyle, contentAreaW)
-		lw := lipgloss.Width(rendered)
-		if pad := contentW - lw; pad > 0 {
-			rendered = strings.Repeat(" ", pad) + rendered
-		}
-		renderedBubbles = append(renderedBubbles, rendered)
-	}
-
 	// Join all rendered bubbles into a single text block, then split into visual lines.
+
+
 	var fullMsgText string
 	for _, rb := range renderedBubbles {
 		fullMsgText += rb + "\n"
@@ -424,7 +420,6 @@ func (m *RootModel) viewChatting() string {
 		if end > totalLines {
 			end = totalLines
 		}
-
 		// Scroll indicator at top.
 		if m.chatScroll > 0 {
 			b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more lines above", m.chatScroll)))
@@ -433,6 +428,13 @@ func (m *RootModel) viewChatting() string {
 
 		for _, l := range allLines[start:end] {
 			b.WriteString(l)
+			b.WriteString("\n")
+		}
+
+		// Scroll indicator at bottom (when scrolled up from bottom).
+		remaining := totalLines - end
+		if remaining > 0 {
+			b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more lines below", remaining)))
 			b.WriteString("\n")
 		}
 	} else {
@@ -455,13 +457,12 @@ func (m *RootModel) viewChatting() string {
 		b.WriteString("\n")
 	}
 
-	// ── Input line with blue border ──
+	// ── Input area (multi-line textarea with blue border) ──
 	b.WriteString("\n")
-	b.WriteString(ChatInputStyle.Render(m.chatInput.View()))
+	b.WriteString(m.chatInput.View())
 	b.WriteString("\n")
 
-	// ── Footer ──
-	b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • PgUp/PgDn: scroll"))
+	b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • PgUp/PgDn/Ctrl↑↓: scroll"))
 	b.WriteString("\n")
 
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()

@@ -81,20 +81,18 @@ func cmdStartChat(agent aiagent.AIAgent, history []ChatLine) tea.Cmd {
 // cmdSendChatMessage sends a chat request and immediately starts waiting
 // for events.  The chat_request payload includes the full history so dscli
 // maintains conversation context.
-func cmdSendChatMessage(session *aiagent.ChatSession, history []ChatLine, input string) tea.Cmd {
-	// Build message list from history + new input.
-	messages := make([]protocol.ChatMessage, 0, len(history)+1)
+// cmdSendChatMessage sends a chat request with the given history and waits
+// for streaming events. The history already contains the latest user message
+// (added on Enter), so we use it as-is without adding a duplicate.
+func cmdSendChatMessage(session *aiagent.ChatSession, history []ChatLine) tea.Cmd {
+	// Build message list from history.
+	messages := make([]protocol.ChatMessage, 0, len(history))
 	for _, line := range history {
 		messages = append(messages, protocol.ChatMessage{
 			Role:    line.Role,
 			Content: line.Content,
 		})
 	}
-	// The new user message.
-	messages = append(messages, protocol.ChatMessage{
-		Role:    "user",
-		Content: input,
-	})
 
 	req := &protocol.Message{
 		Type: protocol.TypeChatRequest,
@@ -113,6 +111,7 @@ func cmdSendChatMessage(session *aiagent.ChatSession, history []ChatLine, input 
 		cmdWaitChatEvent(session),
 	)
 }
+
 
 // cmdWaitChatEvent blocks until the next event arrives from the chat
 // session's Events channel or the session is done.
