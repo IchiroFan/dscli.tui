@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"gitcode.com/dscli/dscli.tui/internal/tui/protocol"
 	"gitcode.com/dscli/dscli.tui/pkg/jsonline"
@@ -194,6 +195,7 @@ func (a *execAgent) execDS(ctx context.Context, args ...string) (*protocol.Comma
 }
 
 // ── Chat ────────────────────────────────────────────────────
+
 // NewChatSession starts a dscli chat subprocess and returns a ChatSession
 // for one-shot exchange (one user message → one response).
 //
@@ -211,6 +213,8 @@ func (a *execAgent) execDS(ctx context.Context, args ...string) (*protocol.Comma
 //  3. Write the user message to the process stdin and close stdin.
 //  4. Read stdout byte-by-byte, emitting ChatChunkPayload for each chunk.
 //  5. On EOF, emit ChatDonePayload.
+//  6. Call cmd.Wait() to collect the process exit code.
+//     If non-zero, emit an error chunk so the TUI can display it.
 func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions) (*ChatSession, error) {
 	args := []string{"chat"}
 	if opts.Stream {
@@ -245,16 +249,19 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 	events := make(chan *protocol.Message, 100)
 	sendCh := make(chan *protocol.Message, 10)
 	done := make(chan struct{})
+	// waitDone carries the result of cmd.Wait().  The goroutine calls
+	// cmd.Wait() exactly once — Close() reads from this channel instead
+	// of calling cmd.Wait() itself, which would race.
+	waitDone := make(chan error, 1)
 
 	// Single goroutine: handles the full exchange lifecycle.
-	// Note: we NEVER call cmd.Wait() here — that's Close()'s responsibility.
-	// Calling cmd.Wait() from both the goroutine AND Close() creates a race
-	// condition (Go exec.Cmd.Wait is not safe for concurrent use) that can
-	// deadlock, freezing the TUI update loop.
+	//
+	// IMPORTANT: the goroutine calls cmd.Wait() exactly once after the
+	// exchange completes.  Close() must NOT call cmd.Wait() — it cancels
+	// the context and waits for waitDone instead.
 	go func() {
 		defer close(done)
 		defer close(events)
-
 
 		// 1. Emit TypeReady immediately — the session is ready to accept input.
 		events <- &protocol.Message{Type: protocol.TypeReady}
@@ -264,11 +271,13 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 		case msg, ok := <-sendCh:
 			if !ok {
 				stdin.Close()
+				waitDone <- cmd.Wait()
 				return
 			}
 			p, ok := msg.Payload.(*protocol.ChatRequestPayload)
 			if !ok || len(p.Messages) == 0 {
 				stdin.Close()
+				waitDone <- cmd.Wait()
 				return
 			}
 			// Find the last user message.
@@ -281,6 +290,7 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 			}
 			if userMsg == "" {
 				stdin.Close()
+				waitDone <- cmd.Wait()
 				return
 			}
 
@@ -329,11 +339,29 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 				}
 			}
 
-			// 5. Emit ChatDone signal.
+			// 5. Wait for the process to finish and collect its exit code.
+			waitErr := cmd.Wait()
+			waitDone <- waitErr
+
+			// If the process exited abnormally, append an error chunk so the
+			// TUI can display it.  The most common case is a DeepSeek API
+			// error mid-stream (partial content + abnormal exit = "premature
+			// termination" illusion).
+			if waitErr != nil {
+				events <- &protocol.Message{
+					Type:    protocol.TypeChatChunk,
+					Payload: &protocol.ChatChunkPayload{
+						Content: fmt.Sprintf("\n⚠️ dscli exited with error: %v\n", waitErr),
+					},
+				}
+			}
+
+			// 6. Emit ChatDone signal.
 			events <- &protocol.Message{Type: protocol.TypeChatDone}
 
 		case <-ctx.Done():
 			stdin.Close()
+			waitDone <- cmd.Wait()
 			return
 		}
 	}()
@@ -344,7 +372,15 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 		Done:   done,
 		close: func() error {
 			cancel()
-			return cmd.Wait()
+			// Wait for the goroutine to finish — it calls cmd.Wait() and
+			// sends the result on waitDone.  Use a timeout to prevent
+			// blocking the TUI update loop indefinitely.
+			select {
+			case err := <-waitDone:
+				return err
+			case <-time.After(10 * time.Second):
+				return fmt.Errorf("timeout waiting for dscli process to exit")
+			}
 		},
 	}, nil
 }
