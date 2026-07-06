@@ -1,8 +1,10 @@
 package aiagent
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -193,10 +195,21 @@ func (a *execAgent) execDS(ctx context.Context, args ...string) (*protocol.Comma
 
 // ── Chat ────────────────────────────────────────────────────
 
-// NewChatSession starts a dscli chat subprocess in JSON-line mode and returns
-// a ChatSession for bidirectional communication.
+// NewChatSession starts a dscli chat subprocess and returns a ChatSession
+// for one-shot exchange (one user message → one response).
+//
+// Temporarily uses plain-text mode (no --json-line) since dscli doesn't
+// yet support the JSON-line protocol.  When --json-line is implemented,
+// this should switch to the JSON-line codec for streaming and AskUser support.
+//
+// Flow per exchange:
+//  1. Emit TypeReady immediately (session starts ready).
+//  2. Wait for ChatRequestPayload from TUI.
+//  3. Write the user message to the process stdin and close stdin.
+//  4. Read all stdout until process exits.
+//  5. Emit ChatChunkPayload with the captured text, then ChatDonePayload.
 func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions) (*ChatSession, error) {
-	args := []string{"--json-line", "chat"}
+	args := []string{"chat"}
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -215,7 +228,7 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 		cancel()
 		return nil, fmt.Errorf("chat stdout pipe: %w", err)
 	}
-	// Forward stderr to os.Stderr for diagnostics (not part of JSON-line protocol).
+	// Forward stderr to os.Stderr for diagnostics.
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
@@ -227,35 +240,79 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 	sendCh := make(chan *protocol.Message, 10)
 	done := make(chan struct{})
 
-	// Read loop: stdout → events
+	// Single goroutine: handles the full exchange lifecycle.
 	go func() {
 		defer close(events)
-		dec := jsonline.NewDecoder(stdout)
-		for dec.Decode() {
-			msg := dec.Message()
-			events <- msg
+		defer close(done)
 
-			if msg.Type == protocol.TypeGoodbye {
+		// 1. Emit TypeReady immediately — the session is ready to accept input.
+		events <- &protocol.Message{Type: protocol.TypeReady}
+
+		// 2. Wait for ChatRequestPayload or cancellation.
+		select {
+		case msg, ok := <-sendCh:
+			if !ok {
+				stdin.Close()
+				cmd.Wait()
 				return
 			}
-		}
-	}()
-
-	// Write loop: sendCh → stdin
-	go func() {
-		enc := jsonline.NewEncoder(stdin)
-		for msg := range sendCh {
-			if err := enc.Encode(msg); err != nil {
+			p, ok := msg.Payload.(*protocol.ChatRequestPayload)
+			if !ok || len(p.Messages) == 0 {
+				stdin.Close()
+				cmd.Wait()
 				return
 			}
-		}
-	}()
+			// Find the last user message.
+			var userMsg string
+			for i := len(p.Messages) - 1; i >= 0; i-- {
+				if p.Messages[i].Role == "user" {
+					userMsg = p.Messages[i].Content
+					break
+				}
+			}
+			if userMsg == "" {
+				stdin.Close()
+				cmd.Wait()
+				return
+			}
 
-	// Cleanup goroutine: wait for process exit
-	go func() {
+			// 3. Write user message to stdin, then close to signal EOF.
+			//    dscli chat processes the input and exits when stdin closes.
+			io.WriteString(stdin, userMsg+"\n")
+			stdin.Close()
+
+			// 4. Read all stdout output.
+			var respBuilder strings.Builder
+			reader := bufio.NewReader(stdout)
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					if line != "" {
+						respBuilder.WriteString(line)
+					}
+					break
+				}
+				respBuilder.WriteString(line)
+			}
+
+			// 5. Emit ChatChunk with the full response text, then ChatDone.
+			response := respBuilder.String()
+			if response != "" {
+				events <- &protocol.Message{
+					Type:    protocol.TypeChatChunk,
+					Payload: &protocol.ChatChunkPayload{Content: response},
+				}
+			}
+			events <- &protocol.Message{Type: protocol.TypeChatDone}
+
+		case <-ctx.Done():
+			stdin.Close()
+			cmd.Wait()
+			return
+		}
+
+		// Wait for the process to fully exit before the goroutine ends.
 		cmd.Wait()
-		close(done)
-		cancel()
 	}()
 
 	return &ChatSession{

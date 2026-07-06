@@ -252,7 +252,11 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chatSession = msg.Session
 		m.chatReady = true
 		m.chatLoading = (m.chatPendingInput != "")
-		return m, nil
+		// Start reading events from the session.  The first event will be
+		// TypeReady (emitted by the session immediately after creation),
+		// which triggers handleChatEvent → cmdSendChatMessage → event loop.
+		return m, cmdWaitChatEvent(msg.Session)
+
 
 	// ── Chat event (chunk, ask_user, done) ───────────────────────
 	case aiagent.ChatEventMsg:
