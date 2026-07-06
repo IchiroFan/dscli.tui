@@ -29,6 +29,8 @@ const (
 	ScreenRunningCmd
 	// ScreenShowOutput displays the result of a non-interactive command.
 	ScreenShowOutput
+	// ScreenHistoryList shows a parsed, selectable list of history messages.
+	ScreenHistoryList
 	// ScreenChatting is the interactive chat view.
 	ScreenChatting
 	// ScreenAskUser is a modal overlay: dscli has asked a question and the
@@ -54,14 +56,25 @@ type ChatLine struct {
 	Content string
 }
 
-// ─── RootModel ───────────────────────────────────────────────────────
+// ─── HistoryItem ───────────────────────────────────────────────────
+
+// HistoryItem represents one entry in the dscli history list.
+type HistoryItem struct {
+	ID   string // numeric ID from dscli
+	Role string // "assistant" | "user" | "tool"
+	Done string // "true" | "false"
+}
+
+// ─── RootModel ─────────────────────────────────────────────────────
 
 // RootModel is the top-level Bubble Tea model.
 //
 // State machine overview:
 //
-//	ScreenMainMenu ←── ScreenShowOutput (any key → back to menu)
-//	    │  │
+//	ScreenMainMenu ←── ScreenHistoryList ←── ScreenShowOutput*
+//	    │                        │
+//	    │  (list selected)        └──(show selected)──→ ScreenRunningCmd
+//	    │                              │
 //	    │  └──(chat selected)──→ ScreenChatting
 //	    │                           │
 //	    │                  (ask_user received)
@@ -77,6 +90,8 @@ type ChatLine struct {
 //	                        (result received)
 //	                                │
 //	                        └──→ ScreenShowOutput
+//	                                │
+//	                        (* when prevScreen is set: back to prevScreen instead of menu)
 type RootModel struct {
 	// Core
 	screen Screen
@@ -105,8 +120,11 @@ type RootModel struct {
 	outputScroll   int      // current scroll offset (0 = top)
 	outputScrollMax int     // max scroll offset (clamped to total - visible)
 
+	// ── History list ────────────────────────────────────────────
+	historyItems  []HistoryItem // parsed from "dscli history list"
+	historyCursor int           // currently highlighted item index
 
-	// ── Chat ──────────────────────────────────────────────────────
+	// ── Chat
 	chatHistory      []ChatLine           // accumulated conversation
 	chatInput        textinput.Model      // chat message input
 	chatLoading      bool                 // true while waiting for AI response

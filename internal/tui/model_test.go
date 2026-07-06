@@ -630,8 +630,339 @@ func TestShowOutputNonKeyIgnored(t *testing.T) {
 	}
 }
 
+// ─── Update: History List ───────────────────────────────────────────
 
-// ─── Update: Chatting ───────────────────────────────────────────────────────
+func TestParseHistoryList(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		want     int // expected item count
+		firstID  string
+		firstRole string
+	}{
+		{
+			name:     "typical output",
+			input:    "25604  assistant  call_xxx  false\n25605  tool  call_xxx  true",
+			want:     2,
+			firstID:  "25604",
+			firstRole: "assistant",
+		},
+		{
+			name:     "single line",
+			input:    "12345  user  call_abc  true",
+			want:     1,
+			firstID:  "12345",
+			firstRole: "user",
+		},
+		{
+			name:     "with trailing spaces",
+			input:    "  100  assistant                  true  ",
+			want:     1,
+			firstID:  "100",
+			firstRole: "assistant",
+		},
+		{
+			name:     "empty input",
+			input:    "",
+			want:     0,
+		},
+		{
+			name:     "blank lines skipped",
+			input:    "25604  assistant  call_x  false\n\n25605  tool  call_y  true",
+			want:     2,
+			firstID:  "25604",
+			firstRole: "assistant",
+		},
+		{
+			name:     "minimum fields only",
+			input:    "1  assistant",
+			want:     1,
+			firstID:  "1",
+			firstRole: "assistant",
+		},
+		{
+			name:     "done false detected",
+			input:    "25604  assistant  call_x  false",
+			want:     1,
+			firstID:  "25604",
+			firstRole: "assistant",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := parseHistoryList(tt.input)
+			if len(items) != tt.want {
+				t.Fatalf("got %d items, want %d", len(items), tt.want)
+			}
+			if tt.want > 0 {
+				if items[0].ID != tt.firstID {
+					t.Errorf("items[0].ID = %q, want %q", items[0].ID, tt.firstID)
+				}
+				if items[0].Role != tt.firstRole {
+					t.Errorf("items[0].Role = %q, want %q", items[0].Role, tt.firstRole)
+				}
+			}
+		})
+	}
+}
+
+func TestHistoryListNavigation(t *testing.T) {
+	t.Run("down moves cursor", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenHistoryList
+		m.historyItems = []HistoryItem{
+			{ID: "1", Role: "user"},
+			{ID: "2", Role: "assistant"},
+			{ID: "3", Role: "tool"},
+		}
+		m.historyCursor = 0
+
+		// Down
+		m = update(m, tea.KeyMsg{Type: tea.KeyDown})
+		if m.historyCursor != 1 {
+			t.Errorf("cursor = %d, want 1 after down", m.historyCursor)
+		}
+
+		// j
+		m = update(m, keyJ)
+		if m.historyCursor != 2 {
+			t.Errorf("cursor = %d, want 2 after j", m.historyCursor)
+		}
+
+		// Down clamped at end
+		m = update(m, tea.KeyMsg{Type: tea.KeyDown})
+		if m.historyCursor != 2 {
+			t.Errorf("cursor should stay at 2 (end of list)")
+		}
+	})
+
+	t.Run("up moves cursor", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenHistoryList
+		m.historyItems = []HistoryItem{
+			{ID: "1", Role: "user"},
+			{ID: "2", Role: "assistant"},
+		}
+		m.historyCursor = 1
+
+		// Up
+		m = update(m, tea.KeyMsg{Type: tea.KeyUp})
+		if m.historyCursor != 0 {
+			t.Errorf("cursor = %d, want 0 after up", m.historyCursor)
+		}
+
+		// Up clamped at 0
+		m = update(m, tea.KeyMsg{Type: tea.KeyUp})
+		if m.historyCursor != 0 {
+			t.Errorf("cursor should stay at 0")
+		}
+	})
+
+	t.Run("k moves up", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenHistoryList
+		m.historyItems = []HistoryItem{
+			{ID: "1", Role: "user"},
+			{ID: "2", Role: "assistant"},
+		}
+		m.historyCursor = 1
+
+		m = update(m, keyK)
+		if m.historyCursor != 0 {
+			t.Errorf("cursor = %d, want 0 after k", m.historyCursor)
+		}
+	})
+}
+
+func TestHistoryListSelect(t *testing.T) {
+	t.Run("enter dispatches show command", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenHistoryList
+		m.historyItems = []HistoryItem{
+			{ID: "25604", Role: "assistant"},
+			{ID: "25605", Role: "tool"},
+		}
+		m.historyCursor = 1
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.screen != ScreenRunningCmd {
+			t.Errorf("screen = %d, want ScreenRunningCmd", m.screen)
+		}
+		if cmd == nil {
+			t.Fatal("expected non-nil cmd")
+		}
+	})
+
+	t.Run("space also selects", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenHistoryList
+		m.historyItems = []HistoryItem{
+			{ID: "100", Role: "user"},
+		}
+		m.historyCursor = 0
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeySpace})
+		if m.screen != ScreenRunningCmd {
+			t.Errorf("screen = %d, want ScreenRunningCmd", m.screen)
+		}
+		if cmd == nil {
+			t.Fatal("expected non-nil cmd")
+		}
+	})
+
+	t.Run("enter with invalid cursor does nothing", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenHistoryList
+		m.historyItems = []HistoryItem{
+			{ID: "1", Role: "user"},
+		}
+		m.historyCursor = -1
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.screen != ScreenHistoryList {
+			t.Errorf("screen should stay ScreenHistoryList, got %d", m.screen)
+		}
+		if cmd != nil {
+			t.Error("expected nil cmd for invalid cursor")
+		}
+	})
+}
+
+func TestHistoryListEsc(t *testing.T) {
+	m := model()
+	m.screen = ScreenHistoryList
+	m.historyItems = []HistoryItem{
+		{ID: "1", Role: "user"},
+		{ID: "2", Role: "assistant"},
+	}
+	m.historyCursor = 1
+	m.err = assertError{"test"}
+
+	// Esc returns to main menu and clears state.
+	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+	}
+	if m.err != nil {
+		t.Error("err should be cleared")
+	}
+	if m.historyItems != nil {
+		t.Error("historyItems should be nil after exit")
+	}
+	if m.historyCursor != 0 {
+		t.Error("historyCursor should be 0 after exit")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd")
+	}
+}
+
+func TestHistoryListQKey(t *testing.T) {
+	m := model()
+	m.screen = ScreenHistoryList
+	m.historyItems = []HistoryItem{{ID: "1", Role: "user"}}
+
+	m, _ = updateWithCmd(m, keyQ)
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu after q", m.screen)
+	}
+}
+
+func TestHistoryListPayload(t *testing.T) {
+	t.Run("valid payload transitions to ScreenHistoryList", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenRunningCmd
+		p := &protocol.CommandResultPayload{
+			Success: true,
+			Data:    "25604  assistant  call_x  false\n25605  tool  call_y  true",
+		}
+		if !m.historyListPayload(p) {
+			t.Fatal("historyListPayload returned false")
+		}
+		if m.screen != ScreenHistoryList {
+			t.Errorf("screen = %d, want ScreenHistoryList", m.screen)
+		}
+		if len(m.historyItems) != 2 {
+			t.Errorf("got %d items, want 2", len(m.historyItems))
+		}
+		if m.historyCursor != 0 {
+			t.Errorf("cursor = %d, want 0", m.historyCursor)
+		}
+	})
+
+	t.Run("nil payload returns false", func(t *testing.T) {
+		m := model()
+		if m.historyListPayload(nil) {
+			t.Error("expected false for nil payload")
+		}
+	})
+
+	t.Run("failed payload returns false", func(t *testing.T) {
+		m := model()
+		p := &protocol.CommandResultPayload{Success: false, Data: "error message"}
+		if m.historyListPayload(p) {
+			t.Error("expected false for failed payload")
+		}
+	})
+
+	t.Run("empty data returns false", func(t *testing.T) {
+		m := model()
+		p := &protocol.CommandResultPayload{Success: true, Data: ""}
+		if m.historyListPayload(p) {
+			t.Error("expected false for empty data")
+		}
+	})
+}
+
+func TestHistoryListNonKeyMsg(t *testing.T) {
+	m := model()
+	m.screen = ScreenHistoryList
+	m.historyItems = []HistoryItem{{ID: "1", Role: "user"}}
+
+	// Non-key messages should be ignored.
+	m = update(m, tea.WindowSizeMsg{Width: 100, Height: 50})
+	if m.screen != ScreenHistoryList {
+		t.Error("non-key msg should not change screen")
+	}
+}
+
+// ─── Update: Show Output back-navigation ───────────────────────────
+
+func TestShowOutputBackToHistoryList(t *testing.T) {
+	m := model()
+	m.screen = ScreenShowOutput
+	m.cmdOutput = "message content"
+	m.prevScreen = ScreenHistoryList
+
+	// Esc should go back to history list, not main menu.
+	m, _ = updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.screen != ScreenHistoryList {
+		t.Errorf("screen = %d, want ScreenHistoryList", m.screen)
+	}
+	if m.err != nil {
+		t.Error("err should be cleared")
+	}
+	// prevScreen should be reset.
+	if m.prevScreen != ScreenMainMenu {
+		t.Error("prevScreen should be reset to ScreenMainMenu")
+	}
+}
+
+func TestShowOutputBackToMainMenu(t *testing.T) {
+	m := model()
+	m.screen = ScreenShowOutput
+	m.cmdOutput = "some output"
+	m.prevScreen = ScreenMainMenu // default
+
+	// Esc should go to main menu.
+	m, _ = updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+	}
+}
+
+// ─── Update: Chatting
 
 func TestChattingSessionReady(t *testing.T) {
 	m := model()

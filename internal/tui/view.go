@@ -89,6 +89,8 @@ func (m *RootModel) renderStatusBar() string {
 		screenName = "💬 Chat"
 	case ScreenShowOutput:
 		screenName = "📄 Output"
+	case ScreenHistoryList:
+		screenName = "📝 History"
 	case ScreenAskUser:
 		screenName = "❓ Ask"
 	case ScreenRunningCmd:
@@ -125,6 +127,8 @@ func (m *RootModel) View() string {
 		return m.viewRunningCmd()
 	case ScreenShowOutput:
 		return m.viewShowOutput()
+	case ScreenHistoryList:
+		return m.viewHistoryList()
 	case ScreenChatting:
 		return m.viewChatting()
 	case ScreenAskUser:
@@ -243,8 +247,95 @@ func (m *RootModel) viewShowOutput() string {
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
 }
 
+// ─── History List ─────────────────────────────────────────────────
 
-// ─── Chatting ────────────────────────────────────────────────────────
+// viewHistoryList renders the selectable history message list.
+func (m *RootModel) viewHistoryList() string {
+	var b strings.Builder
+
+	b.WriteString(HeaderStyle.Render("📝 History"))
+	b.WriteString("\n")
+
+	if len(m.historyItems) == 0 {
+		b.WriteString(NoDataStyle.Render("No history messages found."))
+		b.WriteString("\n\n")
+		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
+		b.WriteString("\n")
+		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	}
+
+	// Calculate how many items fit.
+	// Reservations: header(2) + help line(2) + status bar(1) = 5
+	availableLines := m.Height - 5
+	if availableLines < 3 {
+		availableLines = 3
+	}
+
+	// Display range based on cursor position (keep cursor visible).
+	cursor := m.historyCursor
+	half := availableLines / 2
+	start := cursor - half
+	if start < 0 {
+		start = 0
+	}
+	end := start + availableLines
+	if end > len(m.historyItems) {
+		end = len(m.historyItems)
+		start = end - availableLines
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	// Scroll indicator: top
+	if start > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more items above", start)))
+		b.WriteString("\n")
+	}
+
+	for i := start; i < end; i++ {
+		item := m.historyItems[i]
+		// Format: "ID  Role  [status]"
+		roleIcon := ""
+		switch item.Role {
+		case "assistant":
+			roleIcon = "🧠"
+		case "user":
+			roleIcon = "👤"
+		case "tool":
+			roleIcon = "🔧"
+		default:
+			roleIcon = "❓"
+		}
+		status := ""
+		if item.Done == "false" {
+			status = TimestampStyle.Render(" ⏳")
+		}
+		line := fmt.Sprintf("%s %s %s%s", item.ID, roleIcon, item.Role, status)
+
+		if i == cursor {
+			b.WriteString(ListSelectedStyle.Render("▸ " + line))
+		} else {
+			b.WriteString(ListItemStyle.Render("  " + line))
+		}
+		b.WriteString("\n")
+	}
+
+	// Scroll indicator: bottom
+	remaining := len(m.historyItems) - end
+	if remaining > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more items below", remaining)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · Esc/q back to menu"))
+	b.WriteString("\n")
+
+	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+}
+
+// ─── Chatting
 
 func (m *RootModel) viewChatting() string {
 	var b strings.Builder

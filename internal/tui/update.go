@@ -50,6 +50,8 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateRunningCmd(msg)
 	case ScreenShowOutput:
 		return m.updateShowOutput(msg)
+	case ScreenHistoryList:
+		return m.updateHistoryList(msg)
 	case ScreenChatting:
 		return m.updateChatting(msg)
 	case ScreenAskUser:
@@ -93,6 +95,8 @@ func (m *RootModel) updateMainMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case navBackToMenuMsg:
 		m.screen = ScreenMainMenu
 		m.err = nil
+		m.historyItems = nil
+		m.historyCursor = 0
 		return m, nil
 	}
 
@@ -136,6 +140,8 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 		return m, cmdFlycheck(m.agent)
 
 	case 5: // History
+		m.historyItems = nil
+		m.historyCursor = 0
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.History, "list")
 
@@ -214,8 +220,18 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case aiagent.SubcommandResultMsg:
-		m.showOutput(formatCommandResult(msg.Payload, msg.Err),
-			msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
+		// History "list" goes to selection screen, all others go to output.
+		if msg.Subcmd == "list" && m.historyListPayload(msg.Payload) {
+			// Parsed as history items — transition to ScreenHistoryList.
+		} else if msg.Subcmd == "show" {
+			// Coming from history list selection — return there on exit.
+			m.prevScreen = ScreenHistoryList
+			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
+		} else {
+			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
+		}
 		return m, nil
 
 	// Catch-all: if we receive any other message while running, ignore.
@@ -224,6 +240,48 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// historyListPayload tries to parse a CommandResultPayload as history list output.
+// Returns true and transitions to ScreenHistoryList on success.
+func (m *RootModel) historyListPayload(p *protocol.CommandResultPayload) bool {
+	if p == nil || !p.Success || p.Data == "" {
+		return false
+	}
+	items := parseHistoryList(p.Data)
+	if len(items) == 0 {
+		return false
+	}
+	m.historyItems = items
+	m.historyCursor = 0
+	m.screen = ScreenHistoryList
+	return true
+}
+
+// parseHistoryList parses "dscli history list" output into HistoryItem slice.
+// Format per line: <ID>  <Role>  <ToolCallID>  <Done>
+// Fields are space-separated; 4th field is always last.
+func parseHistoryList(data string) []HistoryItem {
+	lines := strings.Split(strings.TrimSpace(data), "\n")
+	items := make([]HistoryItem, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Split by whitespace — expect at least 2 fields (ID, Role).
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		id := fields[0]
+		role := fields[1]
+		done := "false"
+		if len(fields) >= 4 {
+			done = fields[len(fields)-1] // last field is always Done
+		}
+		items = append(items, HistoryItem{ID: id, Role: role, Done: done})
+	}
+	return items
+}
 
 // showOutput transitions to ScreenShowOutput with pre-split lines for scrolling.
 func (m *RootModel) showOutput(cmdOutput string, cmdSuccess bool) {
@@ -235,9 +293,45 @@ func (m *RootModel) showOutput(cmdOutput string, cmdSuccess bool) {
 	m.screen = ScreenShowOutput
 }
 
+// ─── History List (selectable) ──────────────────────────────────
 
-// ─── Show Output (scrollable) ────────────────────────────────
+// updateHistoryList handles keyboard input on the history selection screen.
+func (m *RootModel) updateHistoryList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "k":
+			if m.historyCursor > 0 {
+				m.historyCursor--
+			}
+			return m, nil
 
+		case "down", "j":
+			if m.historyCursor < len(m.historyItems)-1 {
+				m.historyCursor++
+			}
+			return m, nil
+
+		case "enter", " ":
+			if m.historyCursor < 0 || m.historyCursor >= len(m.historyItems) {
+				return m, nil
+			}
+			id := m.historyItems[m.historyCursor].ID
+			m.screen = ScreenRunningCmd
+			return m, cmdSubcommand(m.agent, m.agent.History, "show", id)
+
+		case "esc", "q":
+			m.historyItems = nil
+			m.historyCursor = 0
+			m.screen = ScreenMainMenu
+			m.err = nil
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// ─── Show Output (scrollable) ────────────────────────────────────
 
 func (m *RootModel) updateShowOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -287,7 +381,15 @@ func (m *RootModel) updateShowOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.outputScroll = m.outputScrollMax
 			return m, nil
 		case "esc", "q", "enter":
-			// Explicit exit keys — return to menu.
+			// If prevScreen is set, go back there (e.g. history list).
+			if m.prevScreen != ScreenMainMenu {
+				dest := m.prevScreen
+				m.prevScreen = ScreenMainMenu
+				m.screen = dest
+				m.err = nil
+				return m, nil
+			}
+			// Otherwise return to main menu.
 			m.screen = ScreenMainMenu
 			m.err = nil
 			return m, nil

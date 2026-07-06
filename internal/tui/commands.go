@@ -47,9 +47,10 @@ func cmdFlycheck(agent aiagent.AIAgent) tea.Cmd {
 
 // cmdSubcommand is a generic factory for subcommand-group methods
 // (history, skill, memory, project, role, tool, mail, service).
-func cmdSubcommand(agent aiagent.AIAgent, method func(context.Context, string, ...string) (*protocol.CommandResultPayload, error), subcmd string) tea.Cmd {
+// args are additional arguments after the subcommand (e.g. "show", "12345").
+func cmdSubcommand(agent aiagent.AIAgent, method func(context.Context, string, ...string) (*protocol.CommandResultPayload, error), subcmd string, args ...string) tea.Cmd {
 	return func() tea.Msg {
-		p, err := method(context.Background(), subcmd)
+		p, err := method(context.Background(), subcmd, args...)
 		return aiagent.SubcommandResultMsg{
 			Payload: p,
 			Err:     err,
