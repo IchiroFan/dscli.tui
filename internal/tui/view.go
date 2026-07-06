@@ -63,9 +63,58 @@ func renderLogo() string {
 	return frameStyle.Render(b.String()) + "\n"
 }
 
+// ─── Status Bar ──────────────────────────────────────────────────────────────
+
+// renderStatusBar returns the full-width status bar at the bottom of every screen.
+// Format:  dscli v1.0 │ 📁 ~/proj │ 🤖 deepseek-chat  │ 💬 Chat
+func (m *RootModel) renderStatusBar() string {
+	// Version badge.
+	version := strings.TrimSpace(m.dscliVersion)
+	if version == "" {
+		version = "dscli"
+	}
+	badge := StatusVersion.Render(" " + version + " ")
+
+	// Project + model labels.
+	projectLabel := StatusLabel.Render(" 📁 " + m.projectRoot + " ")
+	modelLabel := StatusLabel.Render(" 🤖 " + m.modelName + " ")
+	sep := StatusSep.Render("│")
+
+	// Screen name badge (right side).
+	var screenName string
+	switch m.screen {
+	case ScreenMainMenu:
+		screenName = "📋 Menu"
+	case ScreenChatting:
+		screenName = "💬 Chat"
+	case ScreenShowOutput:
+		screenName = "📄 Output"
+	case ScreenAskUser:
+		screenName = "❓ Ask"
+	case ScreenRunningCmd:
+		screenName = "⏳ Running"
+	case ScreenQuitting:
+		screenName = "👋 Quit"
+	}
+	screenBadge := StatusScreen.Render(" " + screenName + " ")
+
+	// Assemble left section: badge │ project │ model
+	left := badge + " " + sep + " " + projectLabel + " " + sep + " " + modelLabel
+	right := screenBadge
+
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	fillerW := m.Width - leftW - rightW
+	if fillerW < 0 {
+		fillerW = 0
+	}
+	filler := strings.Repeat(" ", fillerW)
+
+	barText := left + filler + right
+	return StatusBarBg.Width(m.Width).Render(barText)
+}
 
 // ─── View ────────────────────────────────────────────────────────────
-
 
 // View implements tea.Model.View.
 func (m *RootModel) View() string {
@@ -109,13 +158,15 @@ func (m *RootModel) viewMainMenu() string {
 	b.WriteString("\n")
 	b.WriteString(HelpStyle.Render("↑↓ navigate • enter select • q quit • ctrl+c exit"))
 	b.WriteString("\n")
+	b.WriteString(m.renderStatusBar())
 	return b.String()
 }
 
 // ─── Running Command ─────────────────────────────────────────────────
 
 func (m *RootModel) viewRunningCmd() string {
-	return fmt.Sprintf("%s Running command...\n", m.spinner.View())
+	content := fmt.Sprintf("%s Running command...\n", m.spinner.View())
+	return AppStyle.Width(m.Width).Render(content) + "\n" + m.renderStatusBar()
 }
 
 // ─── Show Output ─────────────────────────────────────────────────────
@@ -139,7 +190,8 @@ func (m *RootModel) viewShowOutput() string {
 	b.WriteString("\n")
 	b.WriteString(HelpStyle.Render("Press any key to return to menu"))
 	b.WriteString("\n")
-	return AppStyle.Render(b.String())
+
+	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
 }
 
 // ─── Chatting ────────────────────────────────────────────────────────
@@ -151,48 +203,78 @@ func (m *RootModel) viewChatting() string {
 	b.WriteString(HeaderStyle.Render("💬 Chat"))
 	b.WriteString("\n")
 
+	// ── Dimensions ──
+	contentW := m.Width - 4 // AppStyle padding (2 left + 2 right)
+	if contentW < 20 {
+		contentW = 20
+	}
+	bubbleMaxW := contentW * BubbleMaxPercent / 100
+	if bubbleMaxW < 20 {
+		bubbleMaxW = 20
+	}
+	const borderPad = 4 // RoundedBorder (2) + Padding(0,1) (2) = 4
+	contentAreaW := bubbleMaxW - borderPad
+	if contentAreaW < 10 {
+		contentAreaW = 10
+	}
+	wrapStyle := lipgloss.NewStyle().Width(contentAreaW)
+
 	// ── History area ──
-	// Calculate how many lines fit: height minus header, footer, input, status.
+	// Calculate how many visual lines fit:
+	//   header(1) + spacer(1) + history(N) + loading(1) + input(3) + footer(1) + status(1) = header+spacer+input+footer+status
+	// Reserve: header(2) + input(3) + footer(1) + loading(1) + margin = ~8
 	maxLines := m.Height - 8
 	if maxLines < 5 {
 		maxLines = 5
 	}
 
-	// Build message lines with proper styling.
-	var msgLines []string
+	// Build rendered bubbles for each chat line.
+	var renderedBubbles []string
 	for _, line := range m.chatHistory {
-		var prefix string
+		var rendered string
 		switch line.Role {
 		case "user":
-			prefix = ChatRoleUserStyle.Render("You:")
+			rendered = RenderBubble(UserBubbleBase, "👤 ", line.Content, wrapStyle, contentAreaW)
+			// Right-align user bubbles.
+			lw := lipgloss.Width(rendered)
+			if pad := contentW - lw; pad > 0 {
+				rendered = strings.Repeat(" ", pad) + rendered
+			}
 		case "assistant":
-			prefix = ChatRoleAssistantStyle.Render("AI:")
+			rendered = RenderBubble(AssistantBubbleBase, "🧠 ", line.Content, wrapStyle, contentAreaW)
 		case "reasoning":
-			prefix = ThinkLineStyle.Render("...")
+			rendered = RenderBubble(ThinkBubbleBase, "", line.Content, wrapStyle, contentAreaW)
 		default:
-			prefix = ""
+			rendered = line.Content
 		}
-		msgLines = append(msgLines, prefix+" "+line.Content)
+		renderedBubbles = append(renderedBubbles, rendered)
 	}
 
-	// Show pending user input (not yet committed to history).
+	// Pending user input (not yet committed to history).
 	if m.chatPendingInput != "" && !m.chatLoading && !m.chatDone {
-		msgLines = append(msgLines,
-			fmt.Sprintf("%s %s %s",
-				ChatRoleUserStyle.Render("You:"),
-				m.chatPendingInput,
-				HelpStyle.Render("(pending...)")))
+		pendingContent := m.chatPendingInput + " " + HelpStyle.Render("(pending...)")
+		rendered := RenderBubble(UserBubbleBase, "👤 ", pendingContent, wrapStyle, contentAreaW)
+		lw := lipgloss.Width(rendered)
+		if pad := contentW - lw; pad > 0 {
+			rendered = strings.Repeat(" ", pad) + rendered
+		}
+		renderedBubbles = append(renderedBubbles, rendered)
 	}
+
+	// Join all rendered bubbles into a single text block, then split into visual lines.
+	var fullMsgText string
+	for _, rb := range renderedBubbles {
+		fullMsgText += rb + "\n"
+	}
+	allLines := strings.Split(strings.TrimSuffix(fullMsgText, "\n"), "\n")
+	totalLines := len(allLines)
 
 	// ── Scrolling ──
-	totalLines := len(msgLines)
 	if totalLines > maxLines {
 		m.chatScrollMax = totalLines - maxLines
-		// Clamp scroll.
 		if m.chatScroll > m.chatScrollMax {
 			m.chatScroll = m.chatScrollMax
 		}
-		// Show the window: from (totalLines - maxLines - scroll) to end.
 		start := totalLines - maxLines - m.chatScroll
 		if start < 0 {
 			start = 0
@@ -201,21 +283,24 @@ func (m *RootModel) viewChatting() string {
 		if end > totalLines {
 			end = totalLines
 		}
-		msgLines = msgLines[start:end]
 
-		// Scroll indicator.
+		// Scroll indicator at top.
 		if m.chatScroll > 0 {
 			b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more lines above", m.chatScroll)))
+			b.WriteString("\n")
+		}
+
+		for _, l := range allLines[start:end] {
+			b.WriteString(l)
 			b.WriteString("\n")
 		}
 	} else {
 		m.chatScrollMax = 0
 		m.chatScroll = 0
-	}
-
-	for _, l := range msgLines {
-		b.WriteString(l)
-		b.WriteString("\n")
+		for _, l := range allLines {
+			b.WriteString(l)
+			b.WriteString("\n")
+		}
 	}
 
 	// ── Status / Spinner ──
@@ -225,104 +310,103 @@ func (m *RootModel) viewChatting() string {
 		b.WriteString("\n")
 	} else if m.chatDone {
 		b.WriteString("\n")
-		b.WriteString(SpinnerDoneStyle.Render("✅ Response complete. Type another message or press Esc for menu."))
+		b.WriteString(SpinnerDoneStyle.Render("✅ Response complete"))
 		b.WriteString("\n")
 	}
 
-	// ── Input line ──
+	// ── Input line with blue border ──
 	b.WriteString("\n")
-	b.WriteString(m.chatInput.View())
+	b.WriteString(ChatInputStyle.Render(m.chatInput.View()))
 	b.WriteString("\n")
 
 	// ── Footer ──
 	b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • PgUp/PgDn: scroll"))
 	b.WriteString("\n")
 
-	return AppStyle.Render(b.String())
+	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
 }
 
 // ─── AskUser Modal ───────────────────────────────────────────────────
 
 func (m *RootModel) viewAskUser() string {
-	var b strings.Builder
-
-	width := m.Width
-	if width < 50 {
-		width = 50
-	}
-	boxW := width - 4
-	if boxW < 40 {
-		boxW = 40
-	}
-
-	// ── Top border ──
-	b.WriteString("┌")
-	b.WriteString(strings.Repeat("─", boxW-2))
-	b.WriteString("┐\n")
+	var content strings.Builder
 
 	// ── Title ──
 	title := "🤖 dscli asks:"
-	b.WriteString(fmt.Sprintf("│ %-*s│\n", boxW-4, title))
+	content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(title))
+	content.WriteString("\n\n")
+
+	// ── Question (word-wrapped) ──
+	boxInnerW := 44 // comfortable inner width for the modal
+	if m.Width-8 < boxInnerW {
+		boxInnerW = m.Width - 8
+		if boxInnerW < 30 {
+			boxInnerW = 30
+		}
+	}
+	for _, line := range wrapText(m.askQuestion, boxInnerW-4) {
+		content.WriteString("  ")
+		content.WriteString(line)
+		content.WriteString("\n")
+	}
+	content.WriteString("\n")
 
 	// ── Separator ──
-	b.WriteString("│")
-	b.WriteString(strings.Repeat("─", boxW-4))
-	b.WriteString("│\n")
-
-	// ── Question ──
-	lines := wrapText(m.askQuestion, boxW-6)
-	for _, line := range lines {
-		b.WriteString(fmt.Sprintf("│  %-*s│\n", boxW-6, line))
-	}
+	content.WriteString("  ")
+	content.WriteString(strings.Repeat("─", boxInnerW-4))
+	content.WriteString("\n\n")
 
 	// ── Input area ──
-	b.WriteString("│")
-	b.WriteString(strings.Repeat("─", boxW-4))
-	b.WriteString("│\n")
-
 	switch m.askSemantic {
 	case protocol.SemanticConfirm:
-		b.WriteString(fmt.Sprintf("│  %s  %-*s│\n",
-			ChatRoleUserStyle.Render("[ y / n ]"),
-			boxW-18, "(y = yes, n = no)"))
+		content.WriteString("  ")
+		content.WriteString(ChatRoleUserStyle.Render("[ y / n ]"))
+		content.WriteString("  ")
+		content.WriteString(HelpStyle.Render("(y = yes, n = no)"))
+		content.WriteString("\n")
 
 	case protocol.SemanticChoice:
-		b.WriteString(fmt.Sprintf("│  %-*s│\n", boxW-4, "Select an option:"))
+		content.WriteString("  ")
+		content.WriteString(HelpStyle.Render("Select an option:"))
+		content.WriteString("\n")
 		for i, opt := range m.askOptions {
 			cursor := "  "
 			if i == m.askChoice {
-				cursor = MenuSelectedStyle.Render("▸")
+				cursor = MenuSelectedStyle.Render("▸ ")
 			}
-			line := fmt.Sprintf("│    %s %s", cursor, opt)
-			padding := boxW - 8 - len(cursor) - len(opt)
-			if padding > 0 {
-				line += strings.Repeat(" ", padding)
-			}
-			line += "│\n"
-			b.WriteString(line)
+			content.WriteString(fmt.Sprintf("    %s%s\n", cursor, opt))
 		}
 
 	case protocol.SemanticInput:
-		b.WriteString(fmt.Sprintf("│  %s│\n", m.askInput.View()))
+		content.WriteString("  ")
+		content.WriteString(m.askInput.View())
+		content.WriteString("\n")
 	}
-
-	// ── Bottom border ──
-	b.WriteString("└")
-	b.WriteString(strings.Repeat("─", boxW-2))
-	b.WriteString("┘\n")
 
 	// ── Help line ──
+	content.WriteString("\n")
 	switch m.askSemantic {
 	case protocol.SemanticConfirm:
-		b.WriteString(HelpStyle.Render("Press y or n to answer"))
+		content.WriteString("  ")
+		content.WriteString(HelpStyle.Render("Press y or n to answer"))
 	case protocol.SemanticChoice:
-		b.WriteString(HelpStyle.Render("↑↓ navigate • enter select"))
+		content.WriteString("  ")
+		content.WriteString(HelpStyle.Render("↑↓ navigate · enter select"))
 	case protocol.SemanticInput:
-		b.WriteString(HelpStyle.Render("Type your answer • enter confirm • esc cancel"))
+		content.WriteString("  ")
+		content.WriteString(HelpStyle.Render("Type · enter confirm · esc cancel"))
 	}
-	b.WriteString("\n")
+	content.WriteString("\n")
 
-	return b.String()
+	// ── Wrap in a lipgloss rounded-border box ──
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPrimary).
+		Padding(0, 1)
+
+	result := boxStyle.Render(content.String()) + "\n"
+	result += m.renderStatusBar()
+	return result
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────

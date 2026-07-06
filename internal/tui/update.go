@@ -200,8 +200,16 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case aiagent.VersionResultMsg:
 		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
 		m.cmdSuccess = msg.Err == nil && msg.Payload != nil && msg.Payload.Success
+		if m.cmdSuccess {
+			m.dscliVersion = strings.TrimSpace(msg.Payload.Data)
+			// Keep only the first line (version summary).
+			if idx := strings.Index(m.dscliVersion, "\n"); idx > 0 {
+				m.dscliVersion = m.dscliVersion[:idx]
+			}
+		}
 		m.screen = ScreenShowOutput
 		return m, nil
+
 
 	case aiagent.FlycheckResultMsg:
 		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)

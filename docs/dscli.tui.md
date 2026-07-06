@@ -793,13 +793,12 @@ func (m Model) fetchBalance() tea.Cmd {
 - [x] 验证所有非交互菜单项（1-13）可正常显示 dscli 输出
 - [x] 错误处理：dscli 未安装、命令执行失败
 - [x] 更新测试覆盖 raw fallback 路径
-### 10.3 Phase 3: 视觉完善（可与 Phase 2 并行）
-- [ ] Status Bar（底部显示版本 / 项目路径 / 模型 / 屏幕名）
-- [ ] Chat 气泡（UserBubbleBase / AssistantBubbleBase 边框）
-- [ ] Chat 输入框蓝色边框
-- [ ] AppStyle.Width() 全屏宽度对齐
-- [ ] AskUser 模态框 lipgloss 美化（替代 ASCII 手绘框）
-- [ ] 帮助栏完善
+- [x] Status Bar（底部显示版本 / 项目路径 / 模型 / 屏幕名）
+- [x] Chat 气泡（UserBubbleBase / AssistantBubbleBase 边框）
+- [x] Chat 输入框蓝色边框
+- [x] AppStyle.Width() 全屏宽度对齐
+- [x] AskUser 模态框 lipgloss 美化（替代 ASCII 手绘框）
+- [x] 帮助栏完善
 
 ### 10.4 Phase 4: 交互式对话（依赖 dscli --json-line）
 **注意**：以下任务依赖 dscli 项目的 `feature/chat-json-mode` 分支实现 `--json-line` 模式。

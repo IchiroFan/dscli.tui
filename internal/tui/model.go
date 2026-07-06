@@ -6,6 +6,8 @@
 package tui
 
 import (
+	"os"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -87,6 +89,11 @@ type RootModel struct {
 	// Global error (cleared after display)
 	err error
 
+	// ── Status bar ──────────────────────────────────────────────
+	dscliVersion string // dscli version string (fetched from agent)
+	projectRoot  string // shortened project directory path
+	modelName    string // current AI model name
+
 	// ── Main menu ─────────────────────────────────────────────────
 	menuItems  []MenuItem
 	menuCursor int // currently highlighted item index
@@ -161,14 +168,19 @@ func New(agent aiagent.AIAgent) *RootModel {
 	sp := spinner.New()
 	sp.Style = SpinnerStyle
 
+	cwd, _ := os.Getwd()
+	projectRoot := ShortenPath(cwd)
+
 	return &RootModel{
-		screen:     ScreenMainMenu,
-		agent:      agent,
-		menuItems:  defaultMenuItems,
-		menuCursor: 0,
-		chatInput:  chatInput,
-		askInput:   askInput,
-		spinner:    sp,
+		screen:       ScreenMainMenu,
+		agent:        agent,
+		projectRoot:  projectRoot,
+		modelName:    "deepseek-chat",
+		menuItems:    defaultMenuItems,
+		menuCursor:   0,
+		chatInput:    chatInput,
+		askInput:     askInput,
+		spinner:      sp,
 	}
 }
 
