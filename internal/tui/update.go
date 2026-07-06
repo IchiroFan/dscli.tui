@@ -176,9 +176,14 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 	}
 }
 
-// ─── Running Command ─────────────────────────────────────────────────
-
 func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Allow Esc to cancel and return to menu (e.g. if command hangs).
+	if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "esc" {
+		m.screen = ScreenMainMenu
+		m.err = nil
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case aiagent.BalanceResultMsg:
 		m.cmdOutput = formatCommandResult(msg.Payload, msg.Err)
@@ -216,16 +221,20 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
+
 // ─── Show Output ─────────────────────────────────────────────────────
 
 func (m *RootModel) updateShowOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg.(type) {
 	case tea.KeyMsg:
-		// Any key goes back to menu.
-		return m, cmdBackToMenu()
+		// Any key goes back to menu — direct transition.
+		m.screen = ScreenMainMenu
+		m.err = nil
+		return m, nil
 	}
 	return m, nil
 }
+
 
 // ─── Chatting ────────────────────────────────────────────────────────
 
@@ -270,12 +279,15 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "esc":
-			// Close session and return to menu.
+			// Close session and return to menu — direct transition.
 			if m.chatSession != nil {
 				m.chatSession.Close() //nolint:errcheck
 				m.chatSession = nil
 			}
-			return m, cmdBackToMenu()
+			m.screen = ScreenMainMenu
+			m.err = nil
+			return m, nil
+
 
 		case "enter":
 			input := strings.TrimSpace(m.chatInput.Value())

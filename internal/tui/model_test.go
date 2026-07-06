@@ -447,6 +447,38 @@ func TestRunningCmdFailedResult(t *testing.T) {
 	}
 }
 
+func TestRunningCmdEsc(t *testing.T) {
+	m := model()
+	m.screen = ScreenRunningCmd
+	m.err = assertError{"some error"}
+	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
+
+	// Esc should return directly to main menu (escape hatch for hung commands).
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+	}
+	if m.err != nil {
+		t.Error("err should be cleared when returning to menu")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd (direct transition)")
+	}
+}
+
+func TestRunningCmdEscOnlyForEsc(t *testing.T) {
+	m := model()
+	m.screen = ScreenRunningCmd
+
+	// Non-Esc key should be ignored.
+	m = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.screen != ScreenRunningCmd {
+		t.Errorf("screen = %d, want ScreenRunningCmd (non-esc key ignored)", m.screen)
+	}
+}
+
+
+
+
 // ─── Update: Show Output ────────────────────────────────────────────────────
 
 func TestShowOutputAnyKey(t *testing.T) {
@@ -454,15 +486,18 @@ func TestShowOutputAnyKey(t *testing.T) {
 	m.screen = ScreenShowOutput
 	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Screen stays unchanged — cmdBackToMenu() returns a command that produces
-	// navBackToMenuMsg, which is processed in the next Update cycle.
-	if m.screen != ScreenShowOutput {
-		t.Errorf("screen = %d, want ScreenShowOutput (transition deferred)", m.screen)
+	// Direct transition: any key immediately returns to main menu.
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
 	}
-	if cmd == nil {
-		t.Error("expected non-nil cmd (back to menu)")
+	if m.err != nil {
+		t.Error("err should be cleared when returning to menu")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd (direct transition)")
 	}
 }
+
 
 func TestShowOutputNonKeyIgnored(t *testing.T) {
 	m := model()
@@ -584,15 +619,18 @@ func TestChattingEsc(t *testing.T) {
 
 	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
 
-	// Screen stays ScreenChatting — cmdBackToMenu() defers the transition
-	// via navBackToMenuMsg in the next Update cycle.
-	if m.screen != ScreenChatting {
-		t.Errorf("screen = %d, want ScreenChatting (transition deferred)", m.screen)
+	// Direct transition: Esc immediately returns to main menu.
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
 	}
-	if cmd == nil {
-		t.Error("expected non-nil cmd (back to menu)")
+	if m.err != nil {
+		t.Error("err should be cleared when returning to menu")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd (direct transition)")
 	}
 }
+
 
 func TestChattingEscClosesSession(t *testing.T) {
 	m := model()
