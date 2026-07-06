@@ -234,8 +234,9 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 		cancel()
 		return nil, fmt.Errorf("chat stdout pipe: %w", err)
 	}
-	// Forward stderr to os.Stderr for diagnostics.
-	cmd.Stderr = os.Stderr
+	// Capture stderr for error diagnostics (shown on terminal AND captured for TUI).
+	var stderrBuf strings.Builder
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -332,14 +333,17 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 			waitDone <- waitErr
 
 			// If the process exited abnormally, append an error chunk so the
-			// TUI can display it.  The most common case is a DeepSeek API
-			// error mid-stream (partial content + abnormal exit = "premature
-			// termination" illusion).
+			// TUI can display it.  Include captured stderr content for diagnostics.
 			if waitErr != nil {
+				errMsg := fmt.Sprintf("\n⚠️ dscli exited with error: %v", waitErr)
+				if stderrContent := strings.TrimSpace(stderrBuf.String()); stderrContent != "" {
+					errMsg += fmt.Sprintf("\n📋 stderr: %s", stderrContent)
+				}
+				errMsg += "\n"
 				events <- &protocol.Message{
 					Type: protocol.TypeChatChunk,
 					Payload: &protocol.ChatChunkPayload{
-						Content: fmt.Sprintf("\n⚠️ dscli exited with error: %v\n", waitErr),
+						Content: errMsg,
 					},
 				}
 			}

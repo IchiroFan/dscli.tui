@@ -40,6 +40,9 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+
+	case tea.MouseMsg:
+		return m.handleMouseEvent(msg)
 	}
 
 	// Route by screen.
@@ -61,6 +64,58 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+// handleMouseEvent processes mouse events, dispatching wheel events to the
+// active screen's scroll logic. Non-wheel mouse events (clicks) are ignored.
+func (m *RootModel) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		switch m.screen {
+		case ScreenShowOutput:
+			// Recalculate scroll bounds (matching keyboard handler behavior).
+			availableHeight := m.Height - 5
+			if availableHeight < 3 {
+				availableHeight = 3
+			}
+			totalLines := len(m.outputLines)
+			if totalLines > availableHeight {
+				m.outputScrollMax = totalLines - availableHeight
+			} else {
+				m.outputScrollMax = 0
+			}
+			if m.outputScroll > 0 {
+				m.outputScroll--
+			}
+		case ScreenChatting:
+			if m.chatScroll < m.chatScrollMax {
+				m.chatScroll++
+			}
+		}
+
+	case tea.MouseButtonWheelDown:
+		switch m.screen {
+		case ScreenShowOutput:
+			availableHeight := m.Height - 5
+			if availableHeight < 3 {
+				availableHeight = 3
+			}
+			totalLines := len(m.outputLines)
+			if totalLines > availableHeight {
+				m.outputScrollMax = totalLines - availableHeight
+			} else {
+				m.outputScrollMax = 0
+			}
+			if m.outputScroll < m.outputScrollMax {
+				m.outputScroll++
+			}
+		case ScreenChatting:
+			if m.chatScroll > 0 {
+				m.chatScroll--
+			}
+		}
+	}
+	return m, nil
 }
 
 // ─── Main Menu ───────────────────────────────────────────────────────
@@ -449,9 +504,20 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Primary mode (edge case: old session finished) produces AI output.
 		if strings.Contains(msg.Output, "已有主 chat 进程运行中") ||
 			strings.Contains(msg.Output, "插话内容为空") {
-			// Climein mode: primary process will pick up the chimein.
-			// Continue waiting for events from the old session.
-			return m, m.waitForMoreChatEvents()
+			// Climein mode: the new dscli process wrote the message to the
+			// chimeins table for the primary to pick up.  Continue waiting
+			// for events from the old session.
+			cmd := m.waitForMoreChatEvents()
+			if cmd == nil {
+				// The old session ended before the chimein was picked up.
+				// Start a new session with the accumulated history
+				// (which already contains the user's interleaved message).
+				m.chatLoading = true
+				m.spinnerOn = true
+				m.chatDone = false
+				return m, cmdStartChat(m.agent, m.chatHistory)
+			}
+			return m, cmd
 		}
 		// Primary mode (edge case): the old session released the lock.
 		// The output is the AI response — add it to chat history.
@@ -532,7 +598,6 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// in the view while the AI is responding.
 			m.chatHistory = append(m.chatHistory, ChatLine{Role: "user", Content: input})
 			m.chatInput.SetValue("")
-			m.chatInput.Blur()
 			m.chatLoading = true
 			m.spinnerOn = true
 			m.chatDone = false
@@ -775,7 +840,6 @@ func (m *RootModel) resumeFromAskUser() (tea.Model, tea.Cmd) {
 	if prev == ScreenChatting && m.chatSession != nil && m.askResponse != nil {
 		m.screen = ScreenChatting
 		m.chatLoading = true // waiting for more events
-		m.chatInput.Blur()
 		return m, cmdSendAskUserResponse(m.chatSession, m.askResponse)
 	}
 
