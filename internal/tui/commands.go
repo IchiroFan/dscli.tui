@@ -119,18 +119,21 @@ func cmdSendChimein(agent aiagent.AIAgent, content string) tea.Cmd {
 }
 
 // cmdWaitChatEvent blocks until the next event arrives from the chat
-// session's Events channel or the session is done.
+// session's Events channel.
+//
+// IMPORTANT: we ONLY select on session.Events, NOT on session.Done.
+// The goroutine closes events via defer AFTER all messages have been
+// emitted (including TypeChatDone).  Selecting on Done creates a race:
+// Done may close while Events still has buffered messages, causing the
+// select to pick Done and return Done:true — the remaining events in the
+// buffer are silently LOST.
 func cmdWaitChatEvent(session *aiagent.ChatSession) tea.Cmd {
 	return func() tea.Msg {
-		select {
-		case msg, ok := <-session.Events:
-			if !ok {
-				return aiagent.ChatEventMsg{Done: true}
-			}
-			return aiagent.ChatEventMsg{Message: msg}
-		case <-session.Done:
+		msg, ok := <-session.Events
+		if !ok {
 			return aiagent.ChatEventMsg{Done: true}
 		}
+		return aiagent.ChatEventMsg{Message: msg}
 	}
 }
 

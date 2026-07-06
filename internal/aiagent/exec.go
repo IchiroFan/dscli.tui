@@ -15,7 +15,8 @@ import (
 	"gitcode.com/dscli/dscli.tui/pkg/jsonline"
 )
 
-const chunkThreshold = 20 // emit chunk on \n or when this many bytes accumulate (smaller = smoother incremental display)
+const chunkThreshold = 10           // emit chunk on \n or when this many bytes accumulate (smaller = smoother incremental display)
+const chunkFlushDelay = 30 * time.Millisecond // min interval between chunk flushes — paces output for smooth streaming
 
 // ─── execAgent ──────────────────────────────────────────────
 
@@ -325,9 +326,11 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 						Payload: &protocol.ChatChunkPayload{Content: chunkBuf.String()},
 					}
 					chunkBuf.Reset()
+					// Pace output: sleep between chunks so the TUI receives
+					// them at a human-readable rate instead of in bursts.
+					time.Sleep(chunkFlushDelay)
 				}
 			}
-
 			// 5. Wait for the process to finish and collect its exit code.
 			waitErr := cmd.Wait()
 			waitDone <- waitErr

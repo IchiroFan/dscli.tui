@@ -295,7 +295,7 @@ func (m *RootModel) viewHistoryList() string {
 
 	for i := start; i < end; i++ {
 		item := m.historyItems[i]
-		// Format: "ID  Role  [status]"
+		// Format: "ID  Role  CreatedAt  [status]"
 		roleIcon := ""
 		switch item.Role {
 		case "assistant":
@@ -311,7 +311,13 @@ func (m *RootModel) viewHistoryList() string {
 		if item.Done == "false" {
 			status = TimestampStyle.Render(" ⏳")
 		}
-		line := fmt.Sprintf("%s %s %s%s", item.ID, roleIcon, item.Role, status)
+		// Shorten ISO timestamp to "MM-DD HH:MM" — first 16 chars after T replacement.
+		ts := item.CreatedAt
+		if len(ts) >= 16 {
+			ts = ts[:16]
+		}
+		ts = strings.Replace(ts, "T", " ", 1)
+		line := fmt.Sprintf("%s %s %s %s%s", item.ID, roleIcon, item.Role, ts, status)
 
 		if i == cursor {
 			b.WriteString(ListSelectedStyle.Render("▸ " + line))
@@ -397,7 +403,6 @@ func (m *RootModel) viewChatting() string {
 	}
 
 	// Join all rendered bubbles into a single text block, then split into visual lines.
-
 
 	var fullMsgText string
 	for _, rb := range renderedBubbles {

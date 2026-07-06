@@ -61,9 +61,10 @@ type ChatLine struct {
 
 // HistoryItem represents one entry in the dscli history list.
 type HistoryItem struct {
-	ID   string // numeric ID from dscli
-	Role string // "assistant" | "user" | "tool"
-	Done string // "true" | "false"
+	ID        string // numeric ID from dscli
+	Role      string // "assistant" | "user" | "tool"
+	Done      string // "true" | "false"
+	CreatedAt string // formatted timestamp from dscli --json output
 }
 
 // ─── RootModel ─────────────────────────────────────────────────────

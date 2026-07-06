@@ -102,11 +102,11 @@ var (
 			Foreground(colorText).
 			PaddingLeft(2)
 
-	// ListSelectedStyle for the currently selected list item.
 	ListSelectedStyle = lipgloss.NewStyle().
 				Foreground(colorPrimary).
 				Bold(true).
 				PaddingLeft(1)
+
 
 	// TimestampStyle for metadata (dates, IDs, counts).
 	TimestampStyle = lipgloss.NewStyle().

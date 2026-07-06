@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -197,9 +198,9 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 
 	case 5: // History
 		m.historyItems = nil
-		m.historyCursor = 0
+		m.historyCursor = -1
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.History, "list")
+		return m, cmdSubcommand(m.agent, m.agent.History, "list", "--json", "--histsize", "500")
 
 	case 6: // Skill
 		m.screen = ScreenRunningCmd
@@ -312,29 +313,32 @@ func (m *RootModel) historyListPayload(p *protocol.CommandResultPayload) bool {
 	return true
 }
 
-// parseHistoryList parses "dscli history list" output into HistoryItem slice.
-// Format per line: <ID>  <Role>  <ToolCallID>  <Done>
-// Fields are space-separated; 4th field is always last.
+// histJSON mirrors the JSON structure from "dscli history list --json".
+type histJSON struct {
+	ID        int64  `json:"id"`
+	Role      string `json:"role"`
+	OK        bool   `json:"ok"`
+	CreatedAt string `json:"created_at"`
+}
+
+// parseHistoryList parses "dscli history list --json" output into HistoryItem slice.
 func parseHistoryList(data string) []HistoryItem {
-	lines := strings.Split(strings.TrimSpace(data), "\n")
-	items := make([]HistoryItem, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Split by whitespace — expect at least 2 fields (ID, Role).
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		id := fields[0]
-		role := fields[1]
+	var entries []histJSON
+	if err := json.Unmarshal([]byte(data), &entries); err != nil {
+		return nil
+	}
+	items := make([]HistoryItem, 0, len(entries))
+	for _, e := range entries {
 		done := "false"
-		if len(fields) >= 4 {
-			done = fields[len(fields)-1] // last field is always Done
+		if e.OK {
+			done = "true"
 		}
-		items = append(items, HistoryItem{ID: id, Role: role, Done: done})
+		items = append(items, HistoryItem{
+			ID:        fmt.Sprint(e.ID),
+			Role:      e.Role,
+			Done:      done,
+			CreatedAt: e.CreatedAt,
+		})
 	}
 	return items
 }
@@ -705,15 +709,31 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 	}
 }
 
-// appendToLastAssistant appends content to the most recent assistant message
-// in the chat history, or creates a new one.
+// appendToLastAssistant appends content/reasoning to the most recent assistant
+// or reasoning ChatLine in chat history, creating new ones as needed.
+//
+// When reasoning is non-empty, a separate "reasoning" ChatLine is created
+// BEFORE the assistant ChatLine so the view renders it in the thinking style.
+// This mirrors dscli's terminal output where 💭 (reasoning) precedes 🐋 (content).
 func (m *RootModel) appendToLastAssistant(content, reasoning string) {
-	if len(m.chatHistory) == 0 || m.chatHistory[len(m.chatHistory)-1].Role != "assistant" {
-		m.chatHistory = append(m.chatHistory, ChatLine{Role: "assistant", Content: ""})
+	if reasoning != "" {
+		if len(m.chatHistory) == 0 || m.chatHistory[len(m.chatHistory)-1].Role != "reasoning" {
+			m.chatHistory = append(m.chatHistory, ChatLine{Role: "reasoning", Content: ""})
+		}
+		last := &m.chatHistory[len(m.chatHistory)-1]
+		last.Content += reasoning
 	}
-	last := &m.chatHistory[len(m.chatHistory)-1]
-	last.Content += content
+	if content != "" {
+		// Ensure a trailing assistant ChatLine exists for content.
+		if len(m.chatHistory) == 0 || m.chatHistory[len(m.chatHistory)-1].Role != "assistant" {
+			m.chatHistory = append(m.chatHistory, ChatLine{Role: "assistant", Content: ""})
+		}
+		last := &m.chatHistory[len(m.chatHistory)-1]
+		last.Content += content
+	}
 }
+
+
 
 // handleChatDone is called when the current chat exchange is complete
 // (via TypeChatDone, TypeGoodbye, or Events channel closed).

@@ -115,7 +115,18 @@ var (
 	keyH    = keyRune('h')
 )
 
+// ─── Mouse wheel helpers ───────────────────────────────────────────────────
+
+func mouseWheelUp() tea.MouseMsg {
+	return tea.MouseMsg{Button: tea.MouseButtonWheelUp}
+}
+
+func mouseWheelDown() tea.MouseMsg {
+	return tea.MouseMsg{Button: tea.MouseButtonWheelDown}
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
+
 
 // model returns a fresh RootModel with Width/Height set for view tests.
 func model() *RootModel {
@@ -639,51 +650,47 @@ func TestParseHistoryList(t *testing.T) {
 		firstRole string
 	}{
 		{
-			name:      "typical output",
-			input:     "25604  assistant  call_xxx  false\n25605  tool  call_xxx  true",
+			name: "typical output",
+			input: `[
+				{"id": 25604, "role": "assistant", "ok": false, "created_at": "2026-07-04T14:00:00+08:00"},
+				{"id": 25605, "role": "tool", "ok": true, "created_at": "2026-07-04T14:00:01+08:00"}
+			]`,
 			want:      2,
 			firstID:   "25604",
 			firstRole: "assistant",
 		},
 		{
-			name:      "single line",
-			input:     "12345  user  call_abc  true",
+			name: "single entry",
+			input: `[
+				{"id": 12345, "role": "user", "ok": true, "created_at": "2026-07-04T14:00:00+08:00"}
+			]`,
 			want:      1,
 			firstID:   "12345",
 			firstRole: "user",
 		},
 		{
-			name:      "with trailing spaces",
-			input:     "  100  assistant                  true  ",
+			name:  "empty array",
+			input: `[]`,
+			want:  0,
+		},
+		{
+			name:  "invalid json",
+			input: "not json",
+			want:  0,
+		},
+		{
+			name:      "done from ok true",
+			input:     `[{"id": 100, "role": "assistant", "ok": true, "created_at": "2026-07-04T14:00:00Z"}]`,
 			want:      1,
 			firstID:   "100",
 			firstRole: "assistant",
 		},
 		{
-			name:  "empty input",
-			input: "",
-			want:  0,
-		},
-		{
-			name:      "blank lines skipped",
-			input:     "25604  assistant  call_x  false\n\n25605  tool  call_y  true",
-			want:      2,
-			firstID:   "25604",
-			firstRole: "assistant",
-		},
-		{
-			name:      "minimum fields only",
-			input:     "1  assistant",
+			name:      "done from ok false",
+			input:     `[{"id": 200, "role": "tool", "ok": false, "created_at": "2026-07-04T14:00:00Z"}]`,
 			want:      1,
-			firstID:   "1",
-			firstRole: "assistant",
-		},
-		{
-			name:      "done false detected",
-			input:     "25604  assistant  call_x  false",
-			want:      1,
-			firstID:   "25604",
-			firstRole: "assistant",
+			firstID:   "200",
+			firstRole: "tool",
 		},
 	}
 
@@ -699,6 +706,9 @@ func TestParseHistoryList(t *testing.T) {
 				}
 				if items[0].Role != tt.firstRole {
 					t.Errorf("items[0].Role = %q, want %q", items[0].Role, tt.firstRole)
+				}
+				if items[0].CreatedAt == "" {
+					t.Error("items[0].CreatedAt should not be empty")
 				}
 			}
 		})
@@ -873,7 +883,7 @@ func TestHistoryListPayload(t *testing.T) {
 		m.screen = ScreenRunningCmd
 		p := &protocol.CommandResultPayload{
 			Success: true,
-			Data:    "25604  assistant  call_x  false\n25605  tool  call_y  true",
+		Data:    `[{"id":25604,"role":"assistant","ok":false,"created_at":"2026-07-04T14:00:00+08:00"},{"id":25605,"role":"tool","ok":true,"created_at":"2026-07-04T14:00:01+08:00"}]`,
 		}
 		if !m.historyListPayload(p) {
 			t.Fatal("historyListPayload returned false")
@@ -885,7 +895,7 @@ func TestHistoryListPayload(t *testing.T) {
 			t.Errorf("got %d items, want 2", len(m.historyItems))
 		}
 		if m.historyCursor != 0 {
-			t.Errorf("cursor = %d, want 0", m.historyCursor)
+			t.Errorf("cursor = %d, want 0 (first item selected)", m.historyCursor)
 		}
 	})
 
@@ -1324,8 +1334,115 @@ func TestChattingScroll(t *testing.T) {
 	})
 }
 
-// ─── Update: handleChatEvent ────────────────────────────────────────────────
+// ─── Mouse wheel scrolling ────────────────────────────────────────────────
 
+func TestShowOutputMouseWheelScrolling(t *testing.T) {
+	t.Run("wheel up scrolls up", func(t *testing.T) {
+		m := model()
+		m.Height = 5
+		m.screen = ScreenShowOutput
+		m.cmdOutput = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+		m.outputLines = strings.Split(m.cmdOutput, "\n")
+		m.outputScroll = 3
+
+		m = update(m, mouseWheelUp())
+		if m.outputScroll != 2 {
+			t.Errorf("outputScroll = %d, want 2 after wheel up", m.outputScroll)
+		}
+	})
+
+	t.Run("wheel down scrolls down", func(t *testing.T) {
+		m := model()
+		m.Height = 5
+		m.screen = ScreenShowOutput
+		m.cmdOutput = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+		m.outputLines = strings.Split(m.cmdOutput, "\n")
+		m.outputScroll = 0
+
+		m = update(m, mouseWheelDown())
+		// avail = 5-5 = 0, clamped to 3. total=8 > 3 → scrollMax=5.
+		if m.outputScroll < 1 {
+			t.Errorf("outputScroll = %d, want >= 1 after wheel down", m.outputScroll)
+		}
+	})
+
+	t.Run("wheel up clamped at top", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenShowOutput
+		m.outputLines = strings.Split("a\nb\nc", "\n")
+		m.outputScroll = 0
+
+		m = update(m, mouseWheelUp())
+		if m.outputScroll != 0 {
+			t.Errorf("outputScroll should stay 0 at top, got %d", m.outputScroll)
+		}
+	})
+}
+
+func TestChattingMouseWheelScrolling(t *testing.T) {
+	t.Run("wheel up scrolls up (increases chatScroll)", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenChatting
+		m.chatScrollMax = 10
+		m.chatScroll = 0
+
+		m = update(m, mouseWheelUp())
+		if m.chatScroll != 1 {
+			t.Errorf("chatScroll = %d, want 1 after wheel up", m.chatScroll)
+		}
+	})
+
+	t.Run("wheel up clamped at max", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenChatting
+		m.chatScrollMax = 5
+		m.chatScroll = 5
+
+		m = update(m, mouseWheelUp())
+		if m.chatScroll != 5 {
+			t.Errorf("chatScroll should stay at 5 (at max)")
+		}
+	})
+
+	t.Run("wheel down scrolls down (decreases chatScroll)", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenChatting
+		m.chatScrollMax = 10
+		m.chatScroll = 3
+
+		m = update(m, mouseWheelDown())
+		if m.chatScroll != 2 {
+			t.Errorf("chatScroll = %d, want 2 after wheel down", m.chatScroll)
+		}
+	})
+
+	t.Run("wheel down clamped at 0", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenChatting
+		m.chatScroll = 0
+
+		m = update(m, mouseWheelDown())
+		if m.chatScroll != 0 {
+			t.Errorf("chatScroll should stay at 0")
+		}
+	})
+}
+
+func TestMouseWheelIgnoredOnNonScrollableScreens(t *testing.T) {
+	m := model()
+	m.screen = ScreenMainMenu
+	saved := m.screen
+	m = update(m, mouseWheelUp())
+	if m.screen != saved {
+		t.Errorf("wheel event changed screen on main menu")
+	}
+	m = update(m, mouseWheelDown())
+	if m.screen != saved {
+		t.Errorf("wheel event changed screen on main menu")
+	}
+}
+
+// ─── Update: handleChatEvent ────────────────────────────────────────────────
 func TestHandleReady(t *testing.T) {
 	t.Run("with history sends message", func(t *testing.T) {
 		m := model()
@@ -1365,21 +1482,28 @@ func TestHandleChatChunk(t *testing.T) {
 	m.screen = ScreenChatting
 	m.chatSession = mockSession()
 
-	// First chunk: creates new assistant message.
+	// First chunk: creates reasoning + assistant messages.
 	chunk1 := &protocol.Message{
 		Type:    protocol.TypeChatChunk,
 		Payload: &protocol.ChatChunkPayload{Content: "Hello ", Reasoning: "thinking..."},
 	}
 	_, cmd1 := handleEvent(m, chunk1)
 
-	if len(m.chatHistory) != 1 {
-		t.Fatalf("history length = %d, want 1", len(m.chatHistory))
+	// Reasoning is now separated: first ChatLine is reasoning, second is content.
+	if len(m.chatHistory) != 2 {
+		t.Fatalf("history length = %d, want 2 (reasoning + assistant)", len(m.chatHistory))
 	}
-	if m.chatHistory[0].Role != "assistant" {
-		t.Errorf("role = %q, want %q", m.chatHistory[0].Role, "assistant")
+	if m.chatHistory[0].Role != "reasoning" {
+		t.Errorf("chatHistory[0].role = %q, want %q", m.chatHistory[0].Role, "reasoning")
 	}
-	if m.chatHistory[0].Content != "Hello " {
-		t.Errorf("content = %q, want %q", m.chatHistory[0].Content, "Hello ")
+	if m.chatHistory[0].Content != "thinking..." {
+		t.Errorf("chatHistory[0].content = %q, want %q", m.chatHistory[0].Content, "thinking...")
+	}
+	if m.chatHistory[1].Role != "assistant" {
+		t.Errorf("chatHistory[1].role = %q, want %q", m.chatHistory[1].Role, "assistant")
+	}
+	if m.chatHistory[1].Content != "Hello " {
+		t.Errorf("chatHistory[1].content = %q, want %q", m.chatHistory[1].Content, "Hello ")
 	}
 	if cmd1 == nil {
 		t.Error("expected non-nil cmd (wait for more events)")
@@ -1392,11 +1516,12 @@ func TestHandleChatChunk(t *testing.T) {
 	}
 	_, cmd2 := handleEvent(m, chunk2)
 
-	if len(m.chatHistory) != 1 {
-		t.Fatalf("history length = %d, want 1", len(m.chatHistory))
+	// Still 2 ChatLines: reasoning + assistant. Content appended to assistant.
+	if len(m.chatHistory) != 2 {
+		t.Fatalf("history length = %d, want 2", len(m.chatHistory))
 	}
-	if m.chatHistory[0].Content != "Hello World!" {
-		t.Errorf("content = %q, want %q", m.chatHistory[0].Content, "Hello World!")
+	if m.chatHistory[1].Content != "Hello World!" {
+		t.Errorf("assistant content = %q, want %q", m.chatHistory[1].Content, "Hello World!")
 	}
 	if cmd2 == nil {
 		t.Error("expected non-nil cmd for second chunk")

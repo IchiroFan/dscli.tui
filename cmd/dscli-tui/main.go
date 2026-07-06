@@ -25,7 +25,7 @@ func main() {
 
 	// Create the TUI model and start Bubble Tea.
 	m := tui.New(agent)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "dscli-tui: %v\n", err)
