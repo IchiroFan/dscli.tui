@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -62,6 +63,8 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAskUser(msg)
 	case ScreenSkillList:
 		return m.updateSkillList(msg)
+	case ScreenMemoryList:
+		return m.updateMemoryList(msg)
 	case ScreenQuitting:
 		return m, tea.Quit
 	default:
@@ -70,7 +73,6 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleMouseEvent processes mouse events, dispatching wheel events to the
-// active screen's scroll logic. Non-wheel mouse events (clicks) are ignored.
 func (m *RootModel) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
@@ -94,7 +96,7 @@ func (m *RootModel) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if m.chatScroll < m.chatScrollMax {
 				m.chatScroll++
 			}
-		case ScreenHistoryList, ScreenSkillList:
+		case ScreenHistoryList, ScreenSkillList, ScreenMemoryList:
 			// Wheel events are not applied to selectable lists (use keyboard).
 		}
 
@@ -118,7 +120,7 @@ func (m *RootModel) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if m.chatScroll > 0 {
 				m.chatScroll--
 			}
-		case ScreenHistoryList, ScreenSkillList:
+		case ScreenHistoryList, ScreenSkillList, ScreenMemoryList:
 			// Wheel events are not applied to selectable lists (use keyboard).
 		}
 	}
@@ -161,6 +163,8 @@ func (m *RootModel) updateMainMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.historyCursor = 0
 		m.skillItems = nil
 		m.skillCursor = 0
+		m.memoryItems = nil
+		m.memoryCursor = 0
 	}
 
 	return m, nil
@@ -216,9 +220,10 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 		return m, cmdSubcommand(m.agent, m.agent.Skill, "list", "skill")
 
 	case 7: // Memory
+		m.memoryItems = nil
+		m.memoryCursor = -1
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.Memory, "search", "memory")
-
+		return m, cmdSubcommand(m.agent, m.agent.Memory, "list", "memory")
 	case 8: // Project
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Project, "list", "project")
@@ -289,10 +294,16 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Route list results to specific handlers based on group.
 		if msg.Subcmd == "list" && msg.Group == "skill" && m.skillListPayload(msg.Payload) {
 			// Parsed as skill items — transition to ScreenSkillList.
+		} else if msg.Subcmd == "list" && msg.Group == "memory" && m.memoryListPayload(msg.Payload) {
+			// Parsed as memory items — transition to ScreenMemoryList.
 		} else if msg.Subcmd == "list" && m.historyListPayload(msg.Payload) {
 			// Parsed as history items — transition to ScreenHistoryList.
 		} else if msg.Subcmd == "show" && msg.Group == "skill" {
 			m.prevScreen = ScreenSkillList
+			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
+		} else if msg.Subcmd == "show" && msg.Group == "memory" {
+			m.prevScreen = ScreenMemoryList
 			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
 				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		} else if msg.Subcmd == "show" {
@@ -304,7 +315,6 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		}
 		return m, nil
-
 	// Catch-all: if we receive any other message while running, ignore.
 	default:
 		return m, nil
@@ -530,8 +540,108 @@ func splitByTwoOrMoreSpaces(line string) []string {
 	return fields
 }
 
-// ─── Show Output (scrollable) ────────────────────────────────────
+// ─── Memory List (selectable) ───────────────────────────────────
 
+// updateMemoryList handles keyboard input on the memory selection screen.
+func (m *RootModel) updateMemoryList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "k":
+			if m.memoryCursor > 0 {
+				m.memoryCursor--
+			}
+			return m, nil
+
+		case "down", "j":
+			if m.memoryCursor < len(m.memoryItems)-1 {
+				m.memoryCursor++
+			}
+			return m, nil
+
+		case "enter", " ":
+			if m.memoryCursor < 0 || m.memoryCursor >= len(m.memoryItems) {
+				return m, nil
+			}
+			id := m.memoryItems[m.memoryCursor].ID
+			m.screen = ScreenRunningCmd
+			return m, cmdSubcommand(m.agent, m.agent.Memory, "show", "memory", id)
+
+		case "esc", "q":
+			m.memoryItems = nil
+			m.memoryCursor = 0
+			m.screen = ScreenMainMenu
+			m.err = nil
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// memoryListPayload tries to parse a CommandResultPayload as memory list output.
+// Returns true and transitions to ScreenMemoryList on success.
+func (m *RootModel) memoryListPayload(p *protocol.CommandResultPayload) bool {
+	if p == nil || !p.Success || p.Data == "" {
+		return false
+	}
+	items := parseMemoryList(p.Data)
+	if len(items) == 0 {
+		return false
+	}
+	m.memoryItems = items
+	m.screen = ScreenMemoryList
+	return true
+}
+// memoryDatePattern matches date format "Mon DD HH:MM:SS" or "Mon  D HH:MM:SS".
+var memoryDatePattern = regexp.MustCompile(`[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}`)
+
+// parseMemoryList parses the "dscli memory list" text table output into
+//	89  History list default cursor on oldest instead of newest record  Jul  6 23:11:57  Jul  6 23:11:57
+func parseMemoryList(data string) []MemoryItem {
+	lines := strings.Split(data, "\n")
+	var items []MemoryItem
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip header line.
+		if strings.Contains(line, "ID") && strings.Contains(line, "TITLE") {
+			continue
+		}
+		// Skip separator lines.
+		if strings.HasPrefix(line, "─") || strings.HasPrefix(line, "-") {
+			continue
+		}
+		// Find date columns by pattern (e.g. "Jul  6 23:11:57").
+		dateIndexes := memoryDatePattern.FindAllStringIndex(line, -1)
+		if len(dateIndexes) < 2 {
+			continue
+		}
+		// Everything before the first date is ID + Title.
+		before := strings.TrimSpace(line[:dateIndexes[0][0]])
+		createdAt := strings.TrimSpace(line[dateIndexes[0][0]:dateIndexes[0][1]])
+		updatedAt := strings.TrimSpace(line[dateIndexes[1][0]:dateIndexes[1][1]])
+
+		// Split the "before" part into ID (first field) and Title (the rest).
+		fields := strings.Fields(before)
+		if len(fields) == 0 {
+			continue
+		}
+		id := fields[0]
+		title := strings.TrimSpace(before[len(id):])
+
+		items = append(items, MemoryItem{
+			ID:        id,
+			Title:     title,
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+		})
+	}
+	return items
+}
+
+// ─── Show Output (scrollable) ────────────────────────────────────
 func (m *RootModel) updateShowOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:

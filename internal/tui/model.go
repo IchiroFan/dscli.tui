@@ -39,6 +39,8 @@ const (
 	ScreenAskUser
 	// ScreenSkillList shows a parsed, selectable list of available skills.
 	ScreenSkillList
+	// ScreenMemoryList shows a parsed, selectable list of memories.
+	ScreenMemoryList
 	// ScreenQuitting performs graceful shutdown.
 	ScreenQuitting
 )
@@ -78,6 +80,16 @@ type SkillItem struct {
 	AutoInject string // "是" | "-"
 }
 
+// ─── MemoryItem ───────────────────────────────────────────────────
+
+// MemoryItem represents one entry in the dscli memory list.
+type MemoryItem struct {
+	ID        string // numeric ID
+	Title     string // memory title
+	CreatedAt string // creation timestamp
+	UpdatedAt string // last update timestamp
+}
+
 // ─── RootModel ─────────────────────────────────────────────────────
 
 // RootModel is the top-level Bubble Tea model.
@@ -99,6 +111,8 @@ type SkillItem struct {
 //	    ├──(history selected)──→ ScreenRunningCmd ──→ ScreenHistoryList
 //	    │                              │
 //	    ├──(skill selected)────→ ScreenRunningCmd ──→ ScreenSkillList
+//	    │                              │
+//	    ├──(memory selected)───→ ScreenRunningCmd ──→ ScreenMemoryList
 //	    │                              │
 //	    └──(command selected)──→ ScreenRunningCmd
 type RootModel struct {
@@ -137,6 +151,10 @@ type RootModel struct {
 	skillItems  []SkillItem // parsed from "dscli skill list"
 	skillCursor int         // currently highlighted item index
 
+	// ── Memory list ────────────────────────────────────────────
+	memoryItems  []MemoryItem // parsed from "dscli memory list"
+	memoryCursor int          // currently highlighted item index
+
 	// ── Chat
 	chatHistory   []ChatLine           // accumulated conversation
 	chatInput     textarea.Model       // multi-line chat message input
@@ -163,6 +181,7 @@ type RootModel struct {
 	// ── Internal flags ────────────────────────────────────────────
 	chatReady bool // true after first ready event in current exchange
 }
+
 
 // ─── Menu item definitions ───────────────────────────────────────────
 

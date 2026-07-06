@@ -93,6 +93,8 @@ func (m *RootModel) renderStatusBar() string {
 		screenName = "📝 History"
 	case ScreenSkillList:
 		screenName = "🛠  Skill"
+	case ScreenMemoryList:
+		screenName = "💾 Memory"
 	case ScreenAskUser:
 		screenName = "❓ Ask"
 	case ScreenRunningCmd:
@@ -137,6 +139,8 @@ func (m *RootModel) View() string {
 		return m.viewAskUser()
 	case ScreenSkillList:
 		return m.viewSkillList()
+	case ScreenMemoryList:
+		return m.viewMemoryList()
 	case ScreenQuitting:
 		return "Goodbye.\n"
 	default:
@@ -145,10 +149,8 @@ func (m *RootModel) View() string {
 }
 
 // ─── Main Menu ───────────────────────────────────────────────────────
-
 func (m *RootModel) viewMainMenu() string {
 	var b strings.Builder
-
 	b.WriteString(renderLogo())
 	b.WriteString("\n")
 
@@ -410,6 +412,85 @@ func (m *RootModel) viewSkillList() string {
 
 	// Scroll indicator: bottom
 	remaining := len(m.skillItems) - end
+	if remaining > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more items below", remaining)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · Esc/q back to menu"))
+	b.WriteString("\n")
+
+	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+}
+
+// ─── Memory List ─────────────────────────────────────────────────
+
+// viewMemoryList renders the selectable memory list.
+func (m *RootModel) viewMemoryList() string {
+	var b strings.Builder
+
+	b.WriteString(HeaderStyle.Render("💾 Memory"))
+	b.WriteString("\n")
+
+	if len(m.memoryItems) == 0 {
+		b.WriteString(NoDataStyle.Render("No memories found."))
+		b.WriteString("\n\n")
+		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
+		b.WriteString("\n")
+		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	}
+
+	// Calculate how many items fit.
+	// Reservations: header(2) + help line(2) + status bar(1) = 5
+	availableLines := m.Height - 5
+	if availableLines < 3 {
+		availableLines = 3
+	}
+
+	// Display range based on cursor position (keep cursor visible).
+	cursor := m.memoryCursor
+	half := availableLines / 2
+	start := cursor - half
+	if start < 0 {
+		start = 0
+	}
+	end := start + availableLines
+	if end > len(m.memoryItems) {
+		end = len(m.memoryItems)
+		start = end - availableLines
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	// Scroll indicator: top
+	if start > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more items above", start)))
+		b.WriteString("\n")
+	}
+
+	for i := start; i < end; i++ {
+		item := m.memoryItems[i]
+		// Shorten title to fit in one line.
+		title := TruncateStr(item.Title, 40)
+		// Shorten timestamps.
+		createdAt := strings.Replace(item.CreatedAt, "T", " ", 1)
+		if len(createdAt) > 16 {
+			createdAt = createdAt[:16]
+		}
+		line := fmt.Sprintf("%s  %s  %s", item.ID, title, createdAt)
+
+		if i == cursor {
+			b.WriteString(ListSelectedStyle.Render("▸ " + line))
+		} else {
+			b.WriteString(ListItemStyle.Render("  " + line))
+		}
+		b.WriteString("\n")
+	}
+
+	// Scroll indicator: bottom
+	remaining := len(m.memoryItems) - end
 	if remaining > 0 {
 		b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more items below", remaining)))
 		b.WriteString("\n")

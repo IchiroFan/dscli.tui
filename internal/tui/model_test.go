@@ -1235,16 +1235,298 @@ func TestSkillListNonKeyMsg(t *testing.T) {
 	}
 }
 
-func TestShowOutputBackToSkillList(t *testing.T) {
+// ─── Update: Memory List ─────────────────────────────────────────
+
+func TestParseMemoryList(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantCount int
+		firstID   string
+		firstTitle string
+	}{
+		{
+			name: "typical output",
+			input: `ID  TITLE                                                           Created At       Updated At
+89  History list default cursor                                   Jul  6 23:11:57  Jul  6 23:11:57
+88  dscli --histsize controls history list visibility              Jul  6 23:06:16  Jul  6 23:06:16`,
+			wantCount:  2,
+			firstID:    "89",
+			firstTitle: "History list default cursor",
+		},
+		{
+			name:      "empty input",
+			input:     "",
+			wantCount: 0,
+		},
+		{
+			name: "header only",
+			input: `ID  TITLE                                                           Created At       Updated At`,
+			wantCount: 0,
+		},
+		{
+			name: "single memory",
+			input: `ID  TITLE     Created At       Updated At
+1   My memory  Jul  1 10:00:00  Jul  1 10:00:00`,
+			wantCount: 1,
+			firstID:   "1",
+			firstTitle: "My memory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := parseMemoryList(tt.input)
+			if len(items) != tt.wantCount {
+				t.Fatalf("got %d items, want %d", len(items), tt.wantCount)
+			}
+			if tt.wantCount > 0 {
+				if items[0].ID != tt.firstID {
+					t.Errorf("items[0].ID = %q, want %q", items[0].ID, tt.firstID)
+				}
+				if items[0].Title != tt.firstTitle {
+					t.Errorf("items[0].Title = %q, want %q", items[0].Title, tt.firstTitle)
+				}
+				if items[0].CreatedAt == "" {
+					t.Error("items[0].CreatedAt should not be empty")
+				}
+			}
+		})
+	}
+}
+
+func TestMemoryListNavigation(t *testing.T) {
+	t.Run("down moves cursor", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenMemoryList
+		m.memoryItems = []MemoryItem{
+			{ID: "1", Title: "memory-a"},
+			{ID: "2", Title: "memory-b"},
+			{ID: "3", Title: "memory-c"},
+		}
+		m.memoryCursor = 0
+
+		// Down
+		m = update(m, tea.KeyMsg{Type: tea.KeyDown})
+		if m.memoryCursor != 1 {
+			t.Errorf("cursor = %d, want 1 after down", m.memoryCursor)
+		}
+
+		// j
+		m = update(m, keyJ)
+		if m.memoryCursor != 2 {
+			t.Errorf("cursor = %d, want 2 after j", m.memoryCursor)
+		}
+
+		// Down clamped at end
+		m = update(m, tea.KeyMsg{Type: tea.KeyDown})
+		if m.memoryCursor != 2 {
+			t.Errorf("cursor should stay at 2 (end of list)")
+		}
+	})
+
+	t.Run("up moves cursor", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenMemoryList
+		m.memoryItems = []MemoryItem{
+			{ID: "1", Title: "memory-a"},
+			{ID: "2", Title: "memory-b"},
+		}
+		m.memoryCursor = 1
+
+		// Up
+		m = update(m, tea.KeyMsg{Type: tea.KeyUp})
+		if m.memoryCursor != 0 {
+			t.Errorf("cursor = %d, want 0 after up", m.memoryCursor)
+		}
+
+		// Up clamped at 0
+		m = update(m, tea.KeyMsg{Type: tea.KeyUp})
+		if m.memoryCursor != 0 {
+			t.Errorf("cursor should stay at 0")
+		}
+	})
+
+	t.Run("k moves up", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenMemoryList
+		m.memoryItems = []MemoryItem{
+			{ID: "1", Title: "memory-a"},
+			{ID: "2", Title: "memory-b"},
+		}
+		m.memoryCursor = 1
+
+		m = update(m, keyK)
+		if m.memoryCursor != 0 {
+			t.Errorf("cursor = %d, want 0 after k", m.memoryCursor)
+		}
+	})
+}
+
+func TestMemoryListSelect(t *testing.T) {
+	t.Run("enter dispatches show command", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenMemoryList
+		m.memoryItems = []MemoryItem{
+			{ID: "89", Title: "first"},
+			{ID: "90", Title: "second"},
+		}
+		m.memoryCursor = 1
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.screen != ScreenRunningCmd {
+			t.Errorf("screen = %d, want ScreenRunningCmd", m.screen)
+		}
+		if cmd == nil {
+			t.Fatal("expected non-nil cmd")
+		}
+	})
+
+	t.Run("space also selects", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenMemoryList
+		m.memoryItems = []MemoryItem{
+			{ID: "100", Title: "my memory"},
+		}
+		m.memoryCursor = 0
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeySpace})
+		if m.screen != ScreenRunningCmd {
+			t.Errorf("screen = %d, want ScreenRunningCmd", m.screen)
+		}
+		if cmd == nil {
+			t.Fatal("expected non-nil cmd")
+		}
+	})
+
+	t.Run("enter with invalid cursor does nothing", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenMemoryList
+		m.memoryItems = []MemoryItem{
+			{ID: "1", Title: "only"},
+		}
+		m.memoryCursor = -1
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.screen != ScreenMemoryList {
+			t.Errorf("screen should stay ScreenMemoryList, got %d", m.screen)
+		}
+		if cmd != nil {
+			t.Error("expected nil cmd for invalid cursor")
+		}
+	})
+}
+
+func TestMemoryListEsc(t *testing.T) {
+	m := model()
+	m.screen = ScreenMemoryList
+	m.memoryItems = []MemoryItem{
+		{ID: "1", Title: "memory-a"},
+		{ID: "2", Title: "memory-b"},
+	}
+	m.memoryCursor = 1
+	m.err = assertError{"test"}
+
+	// Esc returns to main menu and clears state.
+	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+	}
+	if m.err != nil {
+		t.Error("err should be cleared")
+	}
+	if m.memoryItems != nil {
+		t.Error("memoryItems should be nil after exit")
+	}
+	if m.memoryCursor != 0 {
+		t.Error("memoryCursor should be 0 after exit")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd")
+	}
+}
+
+func TestMemoryListQKey(t *testing.T) {
+	m := model()
+	m.screen = ScreenMemoryList
+	m.memoryItems = []MemoryItem{{ID: "1", Title: "memory-a"}}
+
+	m, _ = updateWithCmd(m, keyQ)
+	if m.screen != ScreenMainMenu {
+		t.Errorf("screen = %d, want ScreenMainMenu after q", m.screen)
+	}
+}
+
+func TestMemoryListPayload(t *testing.T) {
+	t.Run("valid payload transitions to ScreenMemoryList", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenRunningCmd
+		p := &protocol.CommandResultPayload{
+			Success: true,
+			Data: `ID  TITLE     Created At       Updated At
+89  My memory  Jul  6 23:11:57  Jul  6 23:11:57
+90  Another    Jul  6 23:06:16  Jul  6 23:06:16`,
+		}
+		if !m.memoryListPayload(p) {
+			t.Fatal("memoryListPayload returned false")
+		}
+		if m.screen != ScreenMemoryList {
+			t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
+		}
+		if len(m.memoryItems) != 2 {
+			t.Errorf("got %d items, want 2", len(m.memoryItems))
+		}
+		if m.memoryCursor != 0 {
+			t.Errorf("cursor = %d, want 0 (first memory)", m.memoryCursor)
+		}
+	})
+
+	t.Run("nil payload returns false", func(t *testing.T) {
+		m := model()
+		if m.memoryListPayload(nil) {
+			t.Error("expected false for nil payload")
+		}
+	})
+
+	t.Run("failed payload returns false", func(t *testing.T) {
+		m := model()
+		p := &protocol.CommandResultPayload{Success: false, Data: "error message"}
+		if m.memoryListPayload(p) {
+			t.Error("expected false for failed payload")
+		}
+	})
+
+	t.Run("empty data returns false", func(t *testing.T) {
+		m := model()
+		p := &protocol.CommandResultPayload{Success: true, Data: ""}
+		if m.memoryListPayload(p) {
+			t.Error("expected false for empty data")
+		}
+	})
+}
+
+func TestMemoryListNonKeyMsg(t *testing.T) {
+	m := model()
+	m.screen = ScreenMemoryList
+	m.memoryItems = []MemoryItem{{ID: "1", Title: "memory-a"}}
+
+	// Non-key messages should be ignored.
+	m = update(m, tea.WindowSizeMsg{Width: 100, Height: 50})
+	if m.screen != ScreenMemoryList {
+		t.Error("non-key msg should not change screen")
+	}
+}
+
+func TestShowOutputBackToMemoryList(t *testing.T) {
 	m := model()
 	m.screen = ScreenShowOutput
-	m.cmdOutput = "skill description content"
-	m.prevScreen = ScreenSkillList
+	m.cmdOutput = "memory detail content"
+	m.prevScreen = ScreenMemoryList
 
-	// Esc should go back to skill list, not main menu.
+	// Esc should go back to memory list, not main menu.
 	m, _ = updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
-	if m.screen != ScreenSkillList {
-		t.Errorf("screen = %d, want ScreenSkillList", m.screen)
+	if m.screen != ScreenMemoryList {
+		t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
 	}
 	if m.err != nil {
 		t.Error("err should be cleared")
@@ -1254,14 +1536,11 @@ func TestShowOutputBackToSkillList(t *testing.T) {
 	}
 }
 
-// ─── Update: Show Output back-navigation ───────────────────────────
-
 func TestShowOutputBackToHistoryList(t *testing.T) {
 	m := model()
 	m.screen = ScreenShowOutput
 	m.cmdOutput = "message content"
 	m.prevScreen = ScreenHistoryList
-
 	// Esc should go back to history list, not main menu.
 	m, _ = updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
 	if m.screen != ScreenHistoryList {
