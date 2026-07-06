@@ -207,9 +207,7 @@ func (a *execAgent) execDS(ctx context.Context, args ...string) (*protocol.Comma
 //  1. Emit TypeReady immediately (session starts ready).
 //  2. Wait for ChatRequestPayload from TUI.
 //  3. Write the user message to the process stdin and close stdin.
-//  4. Read stdout progressively, skipping the user-echo section (everything
-//     before the "------" separator printed by dscli's PrintUserContent),
-//     then emitting ChatChunkPayload for each chunk of the actual response.
+//  4. Read stdout byte-by-byte, emitting ChatChunkPayload for each chunk.
 //  5. On EOF, emit ChatDonePayload.
 func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions) (*ChatSession, error) {
 	args := []string{"chat"}
@@ -288,61 +286,42 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 			io.WriteString(stdin, userMsg+"\n")
 			stdin.Close()
 
-			// 4. Read stdout progressively, emitting chunks in real-time.
-			//    The first section from dscli is the user echo printed by
-			//    outfmt.PrintUserContent, which always ends with "------\n".
-			//    We skip everything before that separator, then emit the
-			//    actual AI response content.
+			// 4. Read stdout byte-by-byte, emitting chunks in real-time.
+			//
+			//    dscli chat --stream outputs the response progressively:
+			//      a) User echo (outfmt.PrintUserContent) — starts with 👤,
+			//         ends with "------\n".
+			//      b) Streamed AI content via chatStream's fmt.Print() —
+			//         may arrive without newlines (SSE chunks).
+			//      c) Reasoning section via PrintContent (💭 header) —
+			//         only when the model provides reasoning_content.
+			//      d) Token stats + session stats at the end.
+			//
+			//    We DO NOT filter echo/stats here — letting everything through
+			//    guarantees the AI response is never lost.  View-level filtering
+			//    can be added later.
 			var chunkBuf strings.Builder
-			var preBuf strings.Builder
 			reader := bufio.NewReader(stdout)
-			skipEcho := true // skip user echo until "------" separator
 
 			for {
 				b, err := reader.ReadByte()
 				if err != nil {
 					// Emit any remaining content before EOF.
 					if chunkBuf.Len() > 0 {
-						content := strings.TrimSpace(chunkBuf.String())
-						if content != "" && !isStatsLine(content) {
-							events <- &protocol.Message{
-								Type:    protocol.TypeChatChunk,
-								Payload: &protocol.ChatChunkPayload{Content: chunkBuf.String()},
-							}
+						events <- &protocol.Message{
+							Type:    protocol.TypeChatChunk,
+							Payload: &protocol.ChatChunkPayload{Content: chunkBuf.String()},
 						}
 					}
 					break
 				}
-
-				if skipEcho {
-					// Accumulate bytes until we hit the "------" separator.
-					if b == '\n' {
-						line := strings.TrimSpace(preBuf.String())
-						if line == "------" {
-							skipEcho = false
-						}
-						preBuf.Reset()
-					} else if preBuf.Len() > 100 {
-						// Safety: line too long without newline, reset.
-						preBuf.Reset()
-					} else {
-						preBuf.WriteByte(b)
-					}
-					continue
-				}
-
 				chunkBuf.WriteByte(b)
 				// Emit on newlines (natural paragraph breaks) or every 80 bytes
 				// (for long code lines without newlines).
 				if b == '\n' || chunkBuf.Len() >= 80 {
-					content := chunkBuf.String()
-					trimmed := strings.TrimSpace(content)
-					// Skip empty chunks and dscli stats lines.
-					if trimmed != "" && !isStatsLine(trimmed) {
-						events <- &protocol.Message{
-							Type:    protocol.TypeChatChunk,
-							Payload: &protocol.ChatChunkPayload{Content: content},
-						}
+					events <- &protocol.Message{
+						Type:    protocol.TypeChatChunk,
+						Payload: &protocol.ChatChunkPayload{Content: chunkBuf.String()},
 					}
 					chunkBuf.Reset()
 				}
@@ -366,16 +345,6 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 			return cmd.Wait()
 		},
 	}, nil
-}
-
-// isStatsLine reports whether s is a dscli session stats line printed by
-// PrintSessionStats.  These lines contain emoji such as ⏱️, 🪙, 💰, 💳
-// and should not be included in the assistant message content.
-func isStatsLine(s string) bool {
-	return strings.HasPrefix(s, "⏱️") ||
-		strings.HasPrefix(s, "🪙") ||
-		strings.HasPrefix(s, "💰") ||
-		strings.HasPrefix(s, "💳")
 }
 
 // ── Close ───────────────────────────────────────────────────
