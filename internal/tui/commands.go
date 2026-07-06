@@ -65,7 +65,6 @@ func cmdSubcommand(agent aiagent.AIAgent, method func(context.Context, string, .
 // ChatSessionReadyMsg when the session is ready.
 func cmdStartChat(agent aiagent.AIAgent, history []ChatLine) tea.Cmd {
 	return func() tea.Msg {
-		// Build ChatSessionOptions from defaults.
 		opts := aiagent.ChatSessionOptions{
 			Model:  "deepseek-chat",
 			Stream: true,
@@ -78,11 +77,8 @@ func cmdStartChat(agent aiagent.AIAgent, history []ChatLine) tea.Cmd {
 	}
 }
 
-// cmdSendChatMessage sends a chat request and immediately starts waiting
-// for events.  The chat_request payload includes the full history so dscli
-// maintains conversation context.
 // cmdSendChatMessage sends a chat request with the given history and waits
-// for streaming events. The history already contains the latest user message
+// for events. The history already contains the latest user message
 // (added on Enter), so we use it as-is without adding a duplicate.
 func cmdSendChatMessage(session *aiagent.ChatSession, history []ChatLine) tea.Cmd {
 	// Build message list from history.
@@ -93,15 +89,12 @@ func cmdSendChatMessage(session *aiagent.ChatSession, history []ChatLine) tea.Cm
 			Content: line.Content,
 		})
 	}
-
 	req := &protocol.Message{
 		Type: protocol.TypeChatRequest,
 		Payload: &protocol.ChatRequestPayload{
 			Messages: messages,
-			Stream:   true,
 		},
 	}
-
 	// Send and then wait for events.
 	return tea.Sequence(
 		func() tea.Msg {

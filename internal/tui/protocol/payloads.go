@@ -6,7 +6,6 @@ package protocol
 type ChatRequestPayload struct {
 	Model    string        `json:"model"`    // model name, e.g. "deepseek-chat"
 	Messages []ChatMessage `json:"messages"` // full message history
-	Stream   bool          `json:"stream"`   // enable streaming
 }
 
 // ChatMessage is a single entry in the message history (OpenAI-compatible).

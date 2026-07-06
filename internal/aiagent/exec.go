@@ -194,14 +194,16 @@ func (a *execAgent) execDS(ctx context.Context, args ...string) (*protocol.Comma
 }
 
 // ── Chat ────────────────────────────────────────────────────
-
 // NewChatSession starts a dscli chat subprocess and returns a ChatSession
 // for one-shot exchange (one user message → one response).
 //
-// Uses --stream mode for real-time output: each SSE chunk from the DeepSeek
-// API is written to stdout by dscli and forwarded as a ChatChunkPayload event.
-// The goroutine reads stdout byte-by-byte and emits events on newline or
-// 80-byte boundaries for smooth real-time display without overwhelming the UI.
+// When opts.Stream is true, dscli is run with --stream, which means it
+// consumes SSE internally and outputs plain-text content deltas to stdout
+// progressively.  Combined with byte-by-byte pipe reading, this gives
+// smooth real-time display.
+//
+// Without --stream, the full response arrives in a single burst after the
+// API call completes.  Both modes work; --stream provides better UX.
 //
 // Flow per exchange:
 //  1. Emit TypeReady immediately (session starts ready).
@@ -288,11 +290,10 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 
 			// 4. Read stdout byte-by-byte, emitting chunks in real-time.
 			//
-			//    dscli chat --stream outputs the response progressively:
+			//    dscli chat outputs the response progressively:
 			//      a) User echo (outfmt.PrintUserContent) — starts with 👤,
 			//         ends with "------\n".
-			//      b) Streamed AI content via chatStream's fmt.Print() —
-			//         may arrive without newlines (SSE chunks).
+			//      b) AI response via PrintContent — may arrive without newlines.
 			//      c) Reasoning section via PrintContent (💭 header) —
 			//         only when the model provides reasoning_content.
 			//      d) Token stats + session stats at the end.
