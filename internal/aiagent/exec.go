@@ -15,7 +15,7 @@ import (
 	"gitcode.com/dscli/dscli.tui/pkg/jsonline"
 )
 
-const chunkThreshold = 80 // emit chunk on \n or when this many bytes accumulate
+const chunkThreshold = 20 // emit chunk on \n or when this many bytes accumulate (smaller = smoother incremental display)
 
 // ─── execAgent ──────────────────────────────────────────────
 
@@ -243,7 +243,7 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 		return nil, fmt.Errorf("start dscli chat: %w", err)
 	}
 
-	events := make(chan *protocol.Message, 100)
+	events := make(chan *protocol.Message, 3) // small buffer for backpressure — producer blocks when full, pacing events for the TUI
 	sendCh := make(chan *protocol.Message, 10)
 	done := make(chan struct{})
 	// waitDone carries the result of cmd.Wait().  The goroutine calls
