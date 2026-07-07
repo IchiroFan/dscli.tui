@@ -97,7 +97,10 @@ func (m *RootModel) renderStatusBar() string {
 		screenName = "💾 Memory"
 	case ScreenToolList:
 		screenName = "🧰 Tool"
+	case ScreenProjectList:
+		screenName = "📁 Project"
 	case ScreenAskUser:
+
 		screenName = "❓ Ask"
 	case ScreenRunningCmd:
 		screenName = "⏳ Running"
@@ -145,8 +148,11 @@ func (m *RootModel) View() string {
 		return m.viewMemoryList()
 	case ScreenToolList:
 		return m.viewToolList()
+	case ScreenProjectList:
+		return m.viewProjectList()
 	case ScreenQuitting:
 		return "Goodbye.\n"
+
 	default:
 		return "Unknown screen.\n"
 	}
@@ -268,7 +274,10 @@ func (m *RootModel) breadcrumb() string {
 		return "📋 Menu  ›  💾 Memory"
 	case ScreenToolList:
 		return "📋 Menu  ›  🧰 Tool"
+	case ScreenProjectList:
+		return "📋 Menu  ›  📁 Project"
 	case ScreenShowOutput:
+
 		icon := "📄"
 		if !m.cmdSuccess {
 			icon = "⚠️ "
@@ -282,7 +291,10 @@ func (m *RootModel) breadcrumb() string {
 			return "📋 Menu  ›  💾 Memory  ›  " + icon + "Output"
 		case ScreenToolList:
 			return "📋 Menu  ›  🧰 Tool  ›  " + icon + "Output"
+		case ScreenProjectList:
+			return "📋 Menu  ›  📁 Project  ›  " + icon + "Output"
 		case ScreenChatting:
+
 			return "📋 Menu  ›  💬 Chat  ›  " + icon + "Output"
 		default:
 			// Directly from main menu (balance, models, flycheck, version, etc.)
@@ -660,6 +672,93 @@ func (m *RootModel) viewToolList() string {
 
 	b.WriteString("\n")
 	b.WriteString(HelpStyle.Render("↑↓ navigate · PgUp/PgDn page · g/G top/bottom · Enter show · Esc/q back"))
+	b.WriteString("\n")
+
+	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+}
+
+// ─── Project List ─────────────────────────────────────────────
+
+// viewProjectList renders the selectable project list.
+func (m *RootModel) viewProjectList() string {
+	var b strings.Builder
+
+	b.WriteString(HeaderStyle.Render(m.breadcrumb()))
+	b.WriteString("\n")
+
+	if len(m.projectItems) == 0 {
+		b.WriteString(NoDataStyle.Render("No projects found."))
+		b.WriteString("\n\n")
+		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
+		b.WriteString("\n")
+		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	}
+
+	// Calculate how many items fit.
+	// Reservations: header(2) + help line(3) + status bar(1) = 6
+	availableLines := m.Height - 6
+	if availableLines < 3 {
+		availableLines = 3
+	}
+
+	// Display range based on cursor position (keep cursor visible).
+	cursor := m.projectCursor
+	half := availableLines / 2
+	start := cursor - half
+	if start < 0 {
+		start = 0
+	}
+	end := start + availableLines
+	if end > len(m.projectItems) {
+		end = len(m.projectItems)
+		start = end - availableLines
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	// ── Column header ──
+	b.WriteString(HelpStyle.Render(fmt.Sprintf("%-5s %-40s %-22s %s",
+		"ID", "PROJECT", "MAINTAINER", "CREATED AT")))
+	b.WriteString("\n")
+
+	// Scroll indicator: top
+	if start > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more items above", start)))
+		b.WriteString("\n")
+	}
+
+	for i := start; i < end; i++ {
+		item := m.projectItems[i]
+		id := item.ID
+		if item.IsCurrent {
+			id = "→ " + id
+		}
+		path := TruncateStr(item.Path, 38)
+		maintainer := TruncateStr(item.Maintainer, 20)
+		createdAt := item.CreatedAt
+		if len(createdAt) > 19 {
+			createdAt = createdAt[:19]
+		}
+		line := fmt.Sprintf("%-5s %-40s %-22s %s", id, path, maintainer, createdAt)
+
+		if i == cursor {
+			b.WriteString(ListSelectedStyle.Render("▸ " + line))
+		} else {
+			b.WriteString(ListItemStyle.Render("  " + line))
+		}
+		b.WriteString("\n")
+	}
+
+	// Scroll indicator: bottom
+	remaining := len(m.projectItems) - end
+	if remaining > 0 {
+		b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more items below", remaining)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(HelpStyle.Render("↑↓ navigate · g/G top/bottom · Enter details · d delete · Esc/q back"))
 	b.WriteString("\n")
 
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()

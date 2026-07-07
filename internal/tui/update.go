@@ -67,8 +67,11 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateMemoryList(msg)
 	case ScreenToolList:
 		return m.updateToolList(msg)
+	case ScreenProjectList:
+		return m.updateProjectList(msg)
 	case ScreenQuitting:
 		return m, tea.Quit
+
 	default:
 		return m, nil
 	}
@@ -98,9 +101,10 @@ func (m *RootModel) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if m.chatScroll < m.chatScrollMax {
 				m.chatScroll++
 			}
-		case ScreenHistoryList, ScreenSkillList, ScreenMemoryList:
+		case ScreenHistoryList, ScreenSkillList, ScreenMemoryList, ScreenToolList, ScreenProjectList:
 			// Wheel events are not applied to selectable lists (use keyboard).
 		}
+
 
 	case tea.MouseButtonWheelDown:
 		switch m.screen {
@@ -122,9 +126,10 @@ func (m *RootModel) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if m.chatScroll > 0 {
 				m.chatScroll--
 			}
-		case ScreenHistoryList, ScreenSkillList, ScreenMemoryList:
+		case ScreenHistoryList, ScreenSkillList, ScreenMemoryList, ScreenToolList, ScreenProjectList:
 			// Wheel events are not applied to selectable lists (use keyboard).
 		}
+
 	}
 	return m, nil
 }
@@ -171,7 +176,11 @@ func (m *RootModel) updateMainMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toolItems = nil
 		m.toolCursor = 0
 		m.toolPage = 0
+		m.projectItems = nil
+		m.projectCursor = 0
+		m.projectRemovePendingID = ""
 	}
+
 
 	return m, nil
 }
@@ -235,6 +244,9 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Memory, "list", "memory")
 	case 8: // Project
+		m.projectItems = nil
+		m.projectCursor = -1
+		m.projectRemovePendingID = ""
 		m.cmdTitle = "📁 Project"
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Project, "list", "project")
@@ -316,6 +328,8 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Parsed as memory items — transition to ScreenMemoryList.
 		} else if msg.Subcmd == "list" && msg.Group == "tool" && m.toolListPayload(msg.Payload) {
 			// Parsed as tool items — transition to ScreenToolList.
+		} else if msg.Subcmd == "list" && msg.Group == "project" && m.projectListPayload(msg.Payload) {
+			// Parsed as project items — transition to ScreenProjectList.
 		} else if msg.Subcmd == "list" && m.historyListPayload(msg.Payload) {
 			// Parsed as history items — transition to ScreenHistoryList.
 		} else if msg.Subcmd == "show" && msg.Group == "tool" {
@@ -334,10 +348,25 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prevScreen = ScreenHistoryList
 			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
 				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
+		} else if msg.Subcmd == "remove" && msg.Group == "project" {
+			if msg.Err == nil && msg.Payload != nil && msg.Payload.Success {
+				// Success: re-run list to refresh.
+				m.projectItems = nil
+				m.projectCursor = -1
+				m.projectRemovePendingID = ""
+				m.cmdTitle = "📁 Project"
+				return m, cmdSubcommand(m.agent, m.agent.Project, "list", "project")
+			}
+			// Failure: show error, then back to project list on Esc.
+			m.prevScreen = ScreenProjectList
+			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		} else {
+
 			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
 				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		}
+
 		return m, nil
 	// Catch-all: if we receive any other message while running, ignore.
 	default:
@@ -762,6 +791,146 @@ func (m *RootModel) updateToolList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+// ─── Project List (selectable) ─────────────────────────────
+
+// updateProjectList handles keyboard input on the project selection screen.
+func (m *RootModel) updateProjectList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "k":
+			if m.projectCursor > 0 {
+				m.projectCursor--
+			}
+			return m, nil
+
+		case "down", "j":
+			if m.projectCursor < len(m.projectItems)-1 {
+				m.projectCursor++
+			}
+			return m, nil
+
+		case "home", "g":
+			m.projectCursor = 0
+			return m, nil
+
+		case "end", "G":
+			m.projectCursor = len(m.projectItems) - 1
+			return m, nil
+
+		case "enter", " ":
+			if m.projectCursor < 0 || m.projectCursor >= len(m.projectItems) {
+				return m, nil
+			}
+			// Show project details as output.
+			item := m.projectItems[m.projectCursor]
+			detail := fmt.Sprintf("ID:        %s\nPath:      %s\nMaintainer: %s\nCreated:   %s",
+				item.ID, item.Path, item.Maintainer, item.CreatedAt)
+			if item.IsCurrent {
+				detail += "\n(Current project)"
+			}
+			m.prevScreen = ScreenProjectList
+			m.showOutput(detail, true)
+			return m, nil
+
+		case "d", "D":
+			if m.projectCursor < 0 || m.projectCursor >= len(m.projectItems) {
+				return m, nil
+			}
+			item := m.projectItems[m.projectCursor]
+			m.projectRemovePendingID = item.ID
+			m.prevScreen = ScreenProjectList
+			m.screen = ScreenAskUser
+			m.askSemantic = protocol.SemanticConfirm
+			m.askQuestion = fmt.Sprintf("Are you sure you want to delete project %s (%s)?",
+				item.ID, item.Path)
+			m.askOptions = nil
+			m.askInput.SetValue("")
+			m.askChoice = 0
+			m.askDone = false
+			m.askResponse = nil
+			return m, nil
+
+		case "esc", "q":
+			m.projectItems = nil
+			m.projectCursor = 0
+			m.projectRemovePendingID = ""
+			m.screen = ScreenMainMenu
+			m.err = nil
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// projectListPayload tries to parse a CommandResultPayload as project list output.
+// Returns true and transitions to ScreenProjectList on success.
+func (m *RootModel) projectListPayload(p *protocol.CommandResultPayload) bool {
+	if p == nil || !p.Success || p.Data == "" {
+		return false
+	}
+	items := parseProjectList(p.Data)
+	if len(items) == 0 {
+		return false
+	}
+	m.projectItems = items
+	m.projectCursor = 0 // select first project
+	m.screen = ScreenProjectList
+	return true
+}
+
+// parseProjectList parses the "dscli project list" text table output into ProjectItem slice.
+// Expected format:
+//
+//	ID     Project                                        Maintainer             Created At
+//	1      ~/go_project/agent                             黎曼(Riemann, 2)         2026-04-27 18:24:32
+//	5      ~/go_project/textSearch                                               2026-05-09 16:37:19
+//	16 →   ~/go_project/dscli.tui                         狄拉克(Dirac, 27)         2026-07-05 18:41:09
+func parseProjectList(data string) []ProjectItem {
+	lines := strings.Split(data, "\n")
+	var items []ProjectItem
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip header line.
+		if strings.Contains(line, "ID") && strings.Contains(line, "Project") {
+			continue
+		}
+		// Skip separator lines.
+		if strings.HasPrefix(line, "─") || strings.HasPrefix(line, "-") {
+			continue
+		}
+		// Columns are separated by 2+ spaces.
+		fields := splitByTwoOrMoreSpaces(line)
+		if len(fields) < 3 {
+			continue
+		}
+		// First field: ID (may have "→" suffix for current project).
+		idField := fields[0]
+		isCurrent := strings.Contains(idField, "→")
+		id := strings.TrimRight(idField, "→ ")
+		path := fields[1]
+		// Last field is always the timestamp. The field(s) between path and
+		// timestamp is the maintainer (may be empty, resulting in 3 fields).
+		createdAt := fields[len(fields)-1]
+		maintainer := ""
+		if len(fields) >= 4 {
+			maintainer = strings.Join(fields[2:len(fields)-1], " ")
+		}
+		items = append(items, ProjectItem{
+			ID:         id,
+			Path:       path,
+			Maintainer: maintainer,
+			CreatedAt:  createdAt,
+			IsCurrent:  isCurrent,
+		})
+	}
+	return items
+}
+
 
 // toolListPayload tries to parse a CommandResultPayload as tool list output.
 // Returns true and transitions to ScreenToolList on success.
@@ -1346,17 +1515,33 @@ func (m *RootModel) updateAskUserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // resumeFromAskUser restores the state before the AskUser modal and sends
 // the user's response back to dscli (if coming from chat).
+// Also handles project deletion confirmation flow.
 func (m *RootModel) resumeFromAskUser() (tea.Model, tea.Cmd) {
 	prev := m.prevScreen
+	askResponse := m.askResponse
 	m.prevScreen = ScreenMainMenu
 
-	if prev == ScreenChatting && m.chatSession != nil && m.askResponse != nil {
+	// ── Chat flow ──────────────────────────────────────────
+	if prev == ScreenChatting && m.chatSession != nil && askResponse != nil {
 		m.screen = ScreenChatting
 		m.chatLoading = true // waiting for more events
-		return m, cmdSendAskUserResponse(m.chatSession, m.askResponse)
+		return m, cmdSendAskUserResponse(m.chatSession, askResponse)
 	}
 
-	// Fallback: return to main menu.
+	// ── Project deletion flow ──────────────────────────────
+	if prev == ScreenProjectList && askResponse != nil && askResponse.Value == "yes" && m.projectRemovePendingID != "" {
+		id := m.projectRemovePendingID
+		m.projectRemovePendingID = ""
+		m.cmdTitle = "📁 Project"
+		m.screen = ScreenRunningCmd
+		return m, cmdSubcommand(m.agent, m.agent.Project, "remove", "project", id)
+	}
+
+	// Fallback: return to prev screen or main menu.
+	if prev == ScreenProjectList {
+		m.screen = ScreenProjectList
+		return m, nil
+	}
 	m.screen = ScreenMainMenu
 	return m, nil
 }

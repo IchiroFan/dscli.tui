@@ -43,9 +43,12 @@ const (
 	ScreenMemoryList
 	// ScreenToolList shows a parsed, selectable list of tools with pagination.
 	ScreenToolList
+	// ScreenProjectList shows a parsed, selectable list of projects.
+	ScreenProjectList
 	// ScreenQuitting performs graceful shutdown.
 	ScreenQuitting
 )
+
 
 // ─── MenuItem ───────────────────────────────────────────────────────
 
@@ -102,8 +105,18 @@ type ToolItem struct {
 	Description string // tool description
 }
 
+// ─── ProjectItem ─────────────────────────────────────────────────
 
-// ─── RootModel ─────────────────────────────────────────────────────
+// ProjectItem represents one entry in the dscli project list.
+type ProjectItem struct {
+	ID         string // numeric ID
+	Path       string // project path
+	Maintainer string // maintainer (may be empty)
+	CreatedAt  string // creation timestamp
+	IsCurrent  bool   // whether this is the current project
+}
+
+
 
 // RootModel is the top-level Bubble Tea model.
 //
@@ -174,7 +187,11 @@ type RootModel struct {
 	toolCursor int        // currently highlighted item index
 	toolPage   int        // current page (0-based) for paginated display
 
-	// ── Chat
+	// ── Project list ──────────────────────────────────────────
+	projectItems          []ProjectItem // parsed from "dscli project list"
+	projectCursor         int           // currently highlighted item index
+	projectRemovePendingID string        // project ID pending deletion confirmation
+
 	chatHistory   []ChatLine           // accumulated conversation
 	chatInput     textarea.Model       // multi-line chat message input
 	chatLoading   bool                 // true while waiting for AI response
