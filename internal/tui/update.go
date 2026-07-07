@@ -161,6 +161,7 @@ func (m *RootModel) updateMainMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.historyItems = nil
 		m.historyCursor = 0
+		m.historyPage = 0
 		m.skillItems = nil
 		m.skillCursor = 0
 		m.memoryItems = nil
@@ -192,26 +193,30 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 		return m, cmdStartChat(m.agent, nil)
 
 	case 1: // Balance
+		m.cmdTitle = "📊 Balance"
 		m.screen = ScreenRunningCmd
 		return m, cmdBalance(m.agent)
 
 	case 2: // Models
+		m.cmdTitle = "🤖 Models"
 		m.screen = ScreenRunningCmd
 		return m, cmdModels(m.agent)
 
 	case 3: // Version
+		m.cmdTitle = "ℹ️  Version"
 		m.screen = ScreenRunningCmd
 		return m, cmdVersion(m.agent)
 
 	case 4: // Flycheck
+		m.cmdTitle = "🔍 Flycheck"
 		m.screen = ScreenRunningCmd
 		return m, cmdFlycheck(m.agent)
-
 	case 5: // History
 		m.historyItems = nil
 		m.historyCursor = -1
+		m.historyPage = 0
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.History, "list", "history", "--json", "--histsize", "500")
+		return m, cmdSubcommand(m.agent, m.agent.History, "list", "history", "--json", "--histsize", "100")
 
 	case 6: // Skill
 		m.skillItems = nil
@@ -225,22 +230,27 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Memory, "list", "memory")
 	case 8: // Project
+		m.cmdTitle = "📁 Project"
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Project, "list", "project")
 
 	case 9: // Role
+		m.cmdTitle = "👤 Role"
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Role, "list", "role")
 
 	case 10: // Tool
+		m.cmdTitle = "🧰 Tool"
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Tool, "list", "tool")
 
 	case 11: // Mail
+		m.cmdTitle = "✉️  Mail"
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Mail, "list", "mail")
 
 	case 12: // Service
+		m.cmdTitle = "🔧 Service"
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Service, "list", "service")
 
@@ -254,8 +264,8 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 }
 
 func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Allow Esc to cancel and return to menu (e.g. if command hangs).
 	if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "esc" {
+		m.cmdTitle = ""
 		m.screen = ScreenMainMenu
 		m.err = nil
 		return m, nil
@@ -321,8 +331,6 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// historyListPayload tries to parse a CommandResultPayload as history list output.
-// Returns true and transitions to ScreenHistoryList on success.
 func (m *RootModel) historyListPayload(p *protocol.CommandResultPayload) bool {
 	if p == nil || !p.Success || p.Data == "" {
 		return false
@@ -331,18 +339,25 @@ func (m *RootModel) historyListPayload(p *protocol.CommandResultPayload) bool {
 	if len(items) == 0 {
 		return false
 	}
+	// Reverse items so newest appears first (dscli returns ascending order).
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
 	m.historyItems = items
-	m.historyCursor = len(items) - 1 // select newest (last) item
+	m.historyCursor = 0 // select first (newest) item
+	m.historyPage = 0   // start from first page
 	m.screen = ScreenHistoryList
 	return true
 }
 
 // histJSON mirrors the JSON structure from "dscli history list --json".
 type histJSON struct {
-	ID        int64  `json:"id"`
-	Role      string `json:"role"`
-	OK        bool   `json:"ok"`
-	CreatedAt string `json:"created_at"`
+	ID               int64  `json:"id"`
+	Role             string `json:"role"`
+	OK               bool   `json:"ok"`
+	CreatedAt        string `json:"created_at"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content"`
 }
 
 // parseHistoryList parses "dscli history list --json" output into HistoryItem slice.
@@ -358,10 +373,12 @@ func parseHistoryList(data string) []HistoryItem {
 			done = "true"
 		}
 		items = append(items, HistoryItem{
-			ID:        fmt.Sprint(e.ID),
-			Role:      e.Role,
-			Done:      done,
-			CreatedAt: e.CreatedAt,
+			ID:               fmt.Sprint(e.ID),
+			Role:             e.Role,
+			Done:             done,
+			CreatedAt:        e.CreatedAt,
+			ReasoningContent: e.ReasoningContent,
+			Content:          e.Content,
 		})
 	}
 	return items
@@ -383,17 +400,75 @@ func (m *RootModel) showOutput(cmdOutput string, cmdSuccess bool) {
 func (m *RootModel) updateHistoryList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Compute page size (fixed 20, capped by terminal height).
+		pageSize := 20
+		maxRows := m.Height - 7
+		if maxRows < 3 {
+			maxRows = 3
+		}
+		if maxRows < pageSize {
+			pageSize = maxRows
+		}
+		totalPages := (len(m.historyItems) + pageSize - 1) / pageSize
+		if totalPages < 1 {
+			totalPages = 1
+		}
+
 		switch msg.String() {
 		case "up", "k":
 			if m.historyCursor > 0 {
 				m.historyCursor--
+				// If cursor moved before current page, flip to previous page.
+				start := m.historyPage * pageSize
+				if m.historyCursor < start && m.historyPage > 0 {
+					m.historyPage--
+					newStart := m.historyPage * pageSize
+					m.historyCursor = newStart + pageSize - 1
+					if m.historyCursor >= len(m.historyItems) {
+						m.historyCursor = len(m.historyItems) - 1
+					}
+				}
 			}
 			return m, nil
 
 		case "down", "j":
 			if m.historyCursor < len(m.historyItems)-1 {
 				m.historyCursor++
+				// If cursor moved past current page, flip to next page.
+				end := (m.historyPage + 1) * pageSize
+				if m.historyCursor >= end {
+					if m.historyPage < totalPages-1 {
+						m.historyPage++
+						m.historyCursor = m.historyPage * pageSize
+					} else {
+						m.historyCursor = end - 1 // restore
+					}
+				}
 			}
+			return m, nil
+
+		case "pgup":
+			if m.historyPage > 0 {
+				m.historyPage--
+				m.historyCursor = m.historyPage * pageSize
+			}
+			return m, nil
+
+		case "pgdown":
+			if m.historyPage < totalPages-1 {
+				m.historyPage++
+				m.historyCursor = m.historyPage * pageSize
+			}
+			return m, nil
+
+		case "home", "g":
+			m.historyPage = 0
+			m.historyCursor = 0
+			return m, nil
+
+		case "end", "G":
+			m.historyPage = totalPages - 1
+			m.historyCursor = m.historyPage * pageSize
 			return m, nil
 
 		case "enter", " ":
@@ -407,6 +482,7 @@ func (m *RootModel) updateHistoryList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc", "q":
 			m.historyItems = nil
 			m.historyCursor = 0
+			m.historyPage = 0
 			m.screen = ScreenMainMenu
 			m.err = nil
 			return m, nil
@@ -589,6 +665,7 @@ func (m *RootModel) memoryListPayload(p *protocol.CommandResultPayload) bool {
 		return false
 	}
 	m.memoryItems = items
+	m.memoryCursor = 0 // select first memory item
 	m.screen = ScreenMemoryList
 	return true
 }
@@ -691,6 +768,7 @@ func (m *RootModel) updateShowOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "esc", "q", "enter":
 			// If prevScreen is set, go back there (e.g. history list).
+			m.cmdTitle = ""
 			if m.prevScreen != ScreenMainMenu {
 				dest := m.prevScreen
 				m.prevScreen = ScreenMainMenu

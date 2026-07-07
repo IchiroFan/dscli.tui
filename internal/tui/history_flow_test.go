@@ -38,8 +38,8 @@ func TestHistoryListArrowAfterTransition(t *testing.T) {
 		t.Fatalf("screen = %d, want ScreenHistoryList (%d)", m.screen, ScreenHistoryList)
 	}
 
-	// Verify cursor was set to last item (newest selected).
-	want := len(m.historyItems) - 1
+	// Verify cursor was set to first item (newest selected).
+	want := 0
 	if m.historyCursor != want {
 		t.Fatalf("historyCursor = %d, want %d (newest item)", m.historyCursor, want)
 	}
@@ -73,7 +73,7 @@ func TestHistoryListArrowAfterTransition(t *testing.T) {
 		t.Logf("Note: %d lines contain ▸ (expected 1)", arrowCount)
 	}
 
-	// Verify the arrow is on the last item (ID 25606, newest).
+	// Verify the arrow is on the first item (ID 25606, newest after reverse).
 	found := false
 	for _, line := range lines {
 		if strings.Contains(line, "▸") {

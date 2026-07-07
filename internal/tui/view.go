@@ -175,8 +175,13 @@ func (m *RootModel) viewMainMenu() string {
 // ─── Running Command ─────────────────────────────────────────────────
 
 func (m *RootModel) viewRunningCmd() string {
-	content := fmt.Sprintf("%s Running command...\n", m.spinner.View())
-	return AppStyle.Width(m.Width).Render(content) + "\n" + m.renderStatusBar()
+	var b strings.Builder
+	b.WriteString(HeaderStyle.Render("⏳ Running"))
+	b.WriteString("\n")
+	b.WriteString(AppStyle.Width(m.Width).Render(
+		fmt.Sprintf("%s Running command...\n", m.spinner.View())))
+	b.WriteString(m.renderStatusBar())
+	return b.String()
 }
 
 // ─── Show Output ─────────────────────────────────────────────────────
@@ -184,13 +189,8 @@ func (m *RootModel) viewRunningCmd() string {
 func (m *RootModel) viewShowOutput() string {
 	var b strings.Builder
 
-	icon := "📄"
-	if !m.cmdSuccess {
-		icon = "⚠️ "
-	}
-	b.WriteString(HeaderStyle.Render(fmt.Sprintf("%s Output", icon)))
+	b.WriteString(HeaderStyle.Render(m.breadcrumb()))
 	b.WriteString("\n")
-
 	// Calculate available height for output content.
 	// Reservations: header(2) + help lines(2) + status bar(1) = 5
 	availableHeight := m.Height - 5
@@ -253,13 +253,49 @@ func (m *RootModel) viewShowOutput() string {
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
 }
 
+// breadcrumb returns the navigation breadcrumb path.
+func (m *RootModel) breadcrumb() string {
+	switch m.screen {
+	case ScreenHistoryList:
+		return "📋 Menu  ›  📝 History"
+	case ScreenSkillList:
+		return "📋 Menu  ›  🛠  Skill"
+	case ScreenMemoryList:
+		return "📋 Menu  ›  💾 Memory"
+	case ScreenShowOutput:
+		icon := "📄"
+		if !m.cmdSuccess {
+			icon = "⚠️ "
+		}
+		switch m.prevScreen {
+		case ScreenHistoryList:
+			return "📋 Menu  ›  📝 History  ›  " + icon + "Output"
+		case ScreenSkillList:
+			return "📋 Menu  ›  🛠  Skills  ›  " + icon + "Output"
+		case ScreenMemoryList:
+			return "📋 Menu  ›  💾 Memory  ›  " + icon + "Output"
+		case ScreenChatting:
+			return "📋 Menu  ›  💬 Chat  ›  " + icon + "Output"
+		default:
+			// Directly from main menu (balance, models, flycheck, version, etc.)
+			label := m.cmdTitle
+			if label == "" {
+				label = icon + "Output"
+			}
+			return "📋 Menu  ›  " + label
+		}
+	default:
+		return ""
+	}
+}
+
 // ─── History List ─────────────────────────────────────────────────
 
 // viewHistoryList renders the selectable history message list.
 func (m *RootModel) viewHistoryList() string {
 	var b strings.Builder
 
-	b.WriteString(HeaderStyle.Render("📝 History"))
+	b.WriteString(HeaderStyle.Render(m.breadcrumb()))
 	b.WriteString("\n")
 
 	if len(m.historyItems) == 0 {
@@ -270,38 +306,61 @@ func (m *RootModel) viewHistoryList() string {
 		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
 	}
 
-	// Calculate how many items fit.
-	// Reservations: header(2) + help line(2) + status bar(1) = 5
-	availableLines := m.Height - 5
-	if availableLines < 3 {
-		availableLines = 3
+	// Pagination: fixed 20 per page, capped by terminal height.
+	pageSize := 20
+	maxRows := m.Height - 7
+	if maxRows < 3 {
+		maxRows = 3
+	}
+	if maxRows < pageSize {
+		pageSize = maxRows
 	}
 
-	// Display range based on cursor position (keep cursor visible).
-	cursor := m.historyCursor
-	half := availableLines / 2
-	start := cursor - half
-	if start < 0 {
-		start = 0
+	totalItems := len(m.historyItems)
+	totalPages := (totalItems + pageSize - 1) / pageSize
+	if totalPages < 1 {
+		totalPages = 1
 	}
-	end := start + availableLines
-	if end > len(m.historyItems) {
-		end = len(m.historyItems)
-		start = end - availableLines
-		if start < 0 {
-			start = 0
+	// Clamp current page to valid range.
+	if m.historyPage >= totalPages {
+		m.historyPage = totalPages - 1
+	}
+	if m.historyPage < 0 {
+		m.historyPage = 0
+	}
+
+	start := m.historyPage * pageSize
+	end := start + pageSize
+	if end > totalItems {
+		end = totalItems
+	}
+
+	// ── Page indicator (fixed at top) ──
+	b.WriteString(PageInfoStyle.Render(fmt.Sprintf("Page %d/%d (items %d-%d of %d)",
+		m.historyPage+1, totalPages, start+1, end, totalItems)))
+	b.WriteString("\n")
+
+	// ── Column header ──
+	b.WriteString(HelpStyle.Render(fmt.Sprintf("%-5s %-14s %-20s %-20s %s",
+		"ID", "ROLE", "reasoning_content", "CONTENT", "CREATED_AT")))
+	b.WriteString("\n")
+
+	// Clamp cursor to current page (skip if cursor not yet initialized, e.g. -1).
+	if m.historyCursor >= 0 {
+		if m.historyCursor < start {
+			m.historyCursor = start
+		}
+		if m.historyCursor >= end {
+			m.historyCursor = end - 1
+			if m.historyCursor < start {
+				m.historyCursor = start
+			}
 		}
 	}
-
-	// Scroll indicator: top
-	if start > 0 {
-		b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more items above", start)))
-		b.WriteString("\n")
-	}
+	cursor := m.historyCursor
 
 	for i := start; i < end; i++ {
 		item := m.historyItems[i]
-		// Format: "ID  Role  CreatedAt  [status]"
 		roleIcon := ""
 		switch item.Role {
 		case "assistant":
@@ -313,17 +372,19 @@ func (m *RootModel) viewHistoryList() string {
 		default:
 			roleIcon = "❓"
 		}
-		status := ""
-		if item.Done == "false" {
-			status = TimestampStyle.Render(" ⏳")
-		}
+		roleWithIcon := roleIcon + " " + item.Role
+
+		// Truncate reasoning_content and content to 20 chars.
+		reasoning := TruncateStr(item.ReasoningContent, 20)
+		content := TruncateStr(item.Content, 20)
+
 		// Shorten ISO timestamp to "MM-DD HH:MM" — first 16 chars after T replacement.
 		ts := item.CreatedAt
 		if len(ts) >= 16 {
 			ts = ts[:16]
 		}
 		ts = strings.Replace(ts, "T", " ", 1)
-		line := fmt.Sprintf("%s %s %s %s%s", item.ID, roleIcon, item.Role, ts, status)
+		line := fmt.Sprintf("%-5s %-14s %-20s %-20s %s", item.ID, roleWithIcon, reasoning, content, ts)
 
 		if i == cursor {
 			b.WriteString(ListSelectedStyle.Render("▸ " + line))
@@ -333,15 +394,8 @@ func (m *RootModel) viewHistoryList() string {
 		b.WriteString("\n")
 	}
 
-	// Scroll indicator: bottom
-	remaining := len(m.historyItems) - end
-	if remaining > 0 {
-		b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more items below", remaining)))
-		b.WriteString("\n")
-	}
-
 	b.WriteString("\n")
-	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · Esc/q back to menu"))
+	b.WriteString(HelpStyle.Render("↑↓ navigate · PgUp/PgDn page · g/G top/bottom · Enter show · Esc/q back"))
 	b.WriteString("\n")
 
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
@@ -353,7 +407,7 @@ func (m *RootModel) viewHistoryList() string {
 func (m *RootModel) viewSkillList() string {
 	var b strings.Builder
 
-	b.WriteString(HeaderStyle.Render("🛠  Skills"))
+	b.WriteString(HeaderStyle.Render(m.breadcrumb()))
 	b.WriteString("\n")
 
 	if len(m.skillItems) == 0 {
@@ -430,7 +484,7 @@ func (m *RootModel) viewSkillList() string {
 func (m *RootModel) viewMemoryList() string {
 	var b strings.Builder
 
-	b.WriteString(HeaderStyle.Render("💾 Memory"))
+	b.WriteString(HeaderStyle.Render(m.breadcrumb()))
 	b.WriteString("\n")
 
 	if len(m.memoryItems) == 0 {
@@ -469,6 +523,9 @@ func (m *RootModel) viewMemoryList() string {
 		b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more items above", start)))
 		b.WriteString("\n")
 	}
+	// ── Column header ──
+	b.WriteString(HelpStyle.Render("ID   Title                                      Created           Updated"))
+	b.WriteString("\n")
 
 	for i := start; i < end; i++ {
 		item := m.memoryItems[i]
@@ -479,7 +536,11 @@ func (m *RootModel) viewMemoryList() string {
 		if len(createdAt) > 16 {
 			createdAt = createdAt[:16]
 		}
-		line := fmt.Sprintf("%s  %s  %s", item.ID, title, createdAt)
+		updatedAt := strings.Replace(item.UpdatedAt, "T", " ", 1)
+		if len(updatedAt) > 16 {
+			updatedAt = updatedAt[:16]
+		}
+		line := fmt.Sprintf("%s  %s  %s  %s", item.ID, title, createdAt, updatedAt)
 
 		if i == cursor {
 			b.WriteString(ListSelectedStyle.Render("▸ " + line))

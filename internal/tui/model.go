@@ -65,12 +65,13 @@ type ChatLine struct {
 
 // HistoryItem represents one entry in the dscli history list.
 type HistoryItem struct {
-	ID        string // numeric ID from dscli
-	Role      string // "assistant" | "user" | "tool"
-	Done      string // "true" | "false"
-	CreatedAt string // formatted timestamp from dscli --json output
+	ID               string // numeric ID from dscli
+	Role             string // "assistant" | "user" | "tool"
+	Done             string // "true" | "false"
+	CreatedAt        string // formatted timestamp from dscli --json output
+	ReasoningContent string // reasoning_content from dscli --json
+	Content          string // content from dscli --json
 }
-
 // ─── SkillItem ────────────────────────────────────────────────────
 
 // SkillItem represents one entry in the dscli skill list.
@@ -146,6 +147,7 @@ type RootModel struct {
 	// ── History list ────────────────────────────────────────────
 	historyItems  []HistoryItem // parsed from "dscli history list"
 	historyCursor int           // currently highlighted item index
+	historyPage   int           // current page (0-based) for paginated display
 
 	// ── Skill list ─────────────────────────────────────────────
 	skillItems  []SkillItem // parsed from "dscli skill list"
@@ -179,7 +181,8 @@ type RootModel struct {
 	askResponse *protocol.AskUserResponsePayload
 
 	// ── Internal flags ────────────────────────────────────────────
-	chatReady bool // true after first ready event in current exchange
+	chatReady bool   // true after first ready event in current exchange
+	cmdTitle  string // display title for current running command (breadcrumb)
 }
 
 

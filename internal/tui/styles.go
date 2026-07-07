@@ -124,8 +124,14 @@ var (
 			Italic(true).
 			PaddingLeft(2).
 			MarginTop(1)
-)
 
+	// PageInfoStyle for the pagination indicator (page X/Y, items range).
+	PageInfoStyle = lipgloss.NewStyle().
+			Foreground(colorMauve).
+			Bold(true).
+			PaddingLeft(2)
+
+)
 // ─── Detail Styles ──────────────────────────────────────────────────────────
 
 var (

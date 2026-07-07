@@ -894,8 +894,8 @@ func TestHistoryListPayload(t *testing.T) {
 		if len(m.historyItems) != 2 {
 			t.Errorf("got %d items, want 2", len(m.historyItems))
 		}
-		if m.historyCursor != len(m.historyItems)-1 {
-			t.Errorf("cursor = %d, want %d (newest item selected)", m.historyCursor, len(m.historyItems)-1)
+		if m.historyCursor != 0 {
+			t.Errorf("cursor = %d, want 0 (newest item selected)", m.historyCursor)
 		}
 	})
 
@@ -1461,6 +1461,7 @@ func TestMemoryListPayload(t *testing.T) {
 	t.Run("valid payload transitions to ScreenMemoryList", func(t *testing.T) {
 		m := model()
 		m.screen = ScreenRunningCmd
+		m.memoryCursor = -1 // simulate state after executeSelected
 		p := &protocol.CommandResultPayload{
 			Success: true,
 			Data: `ID  TITLE     Created At       Updated At
@@ -1477,7 +1478,7 @@ func TestMemoryListPayload(t *testing.T) {
 			t.Errorf("got %d items, want 2", len(m.memoryItems))
 		}
 		if m.memoryCursor != 0 {
-			t.Errorf("cursor = %d, want 0 (first memory)", m.memoryCursor)
+			t.Errorf("cursor = %d, want 0 (first memory selected)", m.memoryCursor)
 		}
 	})
 
