@@ -895,7 +895,7 @@ func (m *RootModel) viewChatting() string {
 		b.WriteString("\n")
 	} else if m.chatLoading {
 		b.WriteString("\n")
-		b.WriteString(ChatLoadingStyle.Render(fmt.Sprintf("%s AI is thinking...", m.spinner.View())))
+		b.WriteString(ChatLoadingStyle.Render(fmt.Sprintf("%s AI is thinking...  [Ctrl+S stop]", m.spinner.View())))
 		b.WriteString("\n")
 	} else if m.chatDone {
 		b.WriteString("\n")
@@ -908,7 +908,11 @@ func (m *RootModel) viewChatting() string {
 	b.WriteString(m.chatInput.View())
 	b.WriteString("\n")
 
-	b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • PgUp/PgDn/Ctrl↑↓: scroll"))
+	if m.chatLoading {
+		b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • Ctrl+S: stop • PgUp/PgDn: scroll"))
+	} else {
+		b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • PgUp/PgDn/Ctrl↑↓: scroll"))
+	}
 	b.WriteString("\n")
 
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()

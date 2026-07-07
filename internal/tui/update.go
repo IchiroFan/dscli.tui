@@ -1359,8 +1359,22 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.chatScroll--
 				}
 				return m, nil
+			case "ctrl+s":
+				// Stop the current AI response but stay in chat.
+				if m.chatSession != nil {
+					m.chatSession.Close() //nolint:errcheck
+					m.chatSession = nil
+				}
+				m.chatLoading = false
+				m.chatDone = true
+				m.spinnerOn = false
+				m.chatHistory = append(m.chatHistory, ChatLine{
+					Role:    "system",
+					Content: "🛑 Response stopped by user",
+				})
+				focusCmd := m.chatInput.Focus()
+				return m, focusCmd
 			default:
-				// Fall through to route text keys to chat input.
 			}
 		}
 

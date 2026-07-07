@@ -1887,6 +1887,86 @@ func TestChattingEscClosesSession(t *testing.T) {
 	// The session cleanup is tested via the real Close path in integration tests.
 }
 
+func TestChattingCtrlSStopDuringLoading(t *testing.T) {
+	t.Run("stops response and stays in chat", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenChatting
+		m.chatLoading = true
+		m.chatDone = false
+		m.spinnerOn = true
+		m.chatSession = mockSession()
+
+		// Close() will panic because close field is nil in mockSession.
+		func() {
+			defer func() { recover() }()
+			m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+
+			// Should stay in chat screen.
+			if m.screen != ScreenChatting {
+				t.Errorf("screen = %d, want ScreenChatting", m.screen)
+			}
+			// Should be marked done.
+			if m.chatLoading {
+				t.Error("chatLoading should be false")
+			}
+			if !m.chatDone {
+				t.Error("chatDone should be true")
+			}
+			if m.spinnerOn {
+				t.Error("spinnerOn should be false")
+			}
+			// Should add system message.
+			if len(m.chatHistory) != 1 || m.chatHistory[0].Role != "system" {
+				t.Errorf("history = %+v, want one system line", m.chatHistory)
+			}
+			if !strings.Contains(m.chatHistory[0].Content, "stopped") {
+				t.Errorf("system message = %q, want 'stopped'", m.chatHistory[0].Content)
+			}
+			// cmd should be non-nil (chatInput.Focus()).
+			if cmd == nil {
+				t.Error("expected non-nil cmd (chatInput.Focus())")
+			}
+		}()
+	})
+
+	t.Run("noop after loading done", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenChatting
+		m.chatLoading = false
+		m.chatDone = true
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+
+		// Should not affect chatDone (Ctrl+S is not handled after loading).
+		if m.screen != ScreenChatting {
+			t.Errorf("screen = %d, want ScreenChatting", m.screen)
+		}
+		if !m.chatDone {
+			t.Error("chatDone should still be true")
+		}
+		_ = cmd // Ctrl+S falls through to textinput which doesn't handle it
+	})
+
+	t.Run("noop when askUserPending", func(t *testing.T) {
+		m := model()
+		m.screen = ScreenChatting
+		m.chatLoading = false
+		m.chatDone = false
+		m.askUserPending = true
+
+		m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyCtrlS})
+
+		// Should be handled by textinput (no screen change).
+		if m.screen != ScreenChatting {
+			t.Errorf("screen = %d, want ScreenChatting", m.screen)
+		}
+		if !m.askUserPending {
+			t.Error("askUserPending should still be true")
+		}
+		_ = cmd // Ctrl+S falls through to textinput which doesn't handle it
+	})
+}
+
 func TestChattingScroll(t *testing.T) {
 	t.Run("pgup increments scroll", func(t *testing.T) {
 		m := model()
