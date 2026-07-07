@@ -41,6 +41,8 @@ const (
 	ScreenSkillList
 	// ScreenMemoryList shows a parsed, selectable list of memories.
 	ScreenMemoryList
+	// ScreenToolList shows a parsed, selectable list of tools with pagination.
+	ScreenToolList
 	// ScreenQuitting performs graceful shutdown.
 	ScreenQuitting
 )
@@ -90,6 +92,16 @@ type MemoryItem struct {
 	CreatedAt string // creation timestamp
 	UpdatedAt string // last update timestamp
 }
+
+// ─── ToolItem ────────────────────────────────────────────────────
+
+// ToolItem represents one entry in the dscli tool list.
+type ToolItem struct {
+	Name        string // tool name
+	Category    string // tool category
+	Description string // tool description
+}
+
 
 // ─── RootModel ─────────────────────────────────────────────────────
 
@@ -156,6 +168,11 @@ type RootModel struct {
 	// ── Memory list ────────────────────────────────────────────
 	memoryItems  []MemoryItem // parsed from "dscli memory list"
 	memoryCursor int          // currently highlighted item index
+
+	// ── Tool list ─────────────────────────────────────────────
+	toolItems  []ToolItem // parsed from "dscli tool list"
+	toolCursor int        // currently highlighted item index
+	toolPage   int        // current page (0-based) for paginated display
 
 	// ── Chat
 	chatHistory   []ChatLine           // accumulated conversation

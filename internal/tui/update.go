@@ -65,6 +65,8 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSkillList(msg)
 	case ScreenMemoryList:
 		return m.updateMemoryList(msg)
+	case ScreenToolList:
+		return m.updateToolList(msg)
 	case ScreenQuitting:
 		return m, tea.Quit
 	default:
@@ -166,6 +168,9 @@ func (m *RootModel) updateMainMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.skillCursor = 0
 		m.memoryItems = nil
 		m.memoryCursor = 0
+		m.toolItems = nil
+		m.toolCursor = 0
+		m.toolPage = 0
 	}
 
 	return m, nil
@@ -240,6 +245,9 @@ func (m *RootModel) executeSelected() (tea.Model, tea.Cmd) {
 		return m, cmdSubcommand(m.agent, m.agent.Role, "list", "role")
 
 	case 10: // Tool
+		m.toolItems = nil
+		m.toolCursor = -1
+		m.toolPage = 0
 		m.cmdTitle = "🧰 Tool"
 		m.screen = ScreenRunningCmd
 		return m, cmdSubcommand(m.agent, m.agent.Tool, "list", "tool")
@@ -306,8 +314,14 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Parsed as skill items — transition to ScreenSkillList.
 		} else if msg.Subcmd == "list" && msg.Group == "memory" && m.memoryListPayload(msg.Payload) {
 			// Parsed as memory items — transition to ScreenMemoryList.
+		} else if msg.Subcmd == "list" && msg.Group == "tool" && m.toolListPayload(msg.Payload) {
+			// Parsed as tool items — transition to ScreenToolList.
 		} else if msg.Subcmd == "list" && m.historyListPayload(msg.Payload) {
 			// Parsed as history items — transition to ScreenHistoryList.
+		} else if msg.Subcmd == "show" && msg.Group == "tool" {
+			m.prevScreen = ScreenToolList
+			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
+				msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		} else if msg.Subcmd == "show" && msg.Group == "skill" {
 			m.prevScreen = ScreenSkillList
 			m.showOutput(formatCommandResult(msg.Payload, msg.Err),
@@ -653,6 +667,158 @@ func (m *RootModel) updateMemoryList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+// ─── Tool List (selectable) ───────────────────────────────────
+
+// updateToolList handles keyboard input on the tool selection screen.
+func (m *RootModel) updateToolList(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		// Pagination: fixed 10 per page, capped by terminal height.
+		pageSize := 10
+		maxRows := m.Height - 7
+		if maxRows < 3 {
+			maxRows = 3
+		}
+		if maxRows < pageSize {
+			pageSize = maxRows
+		}
+		totalPages := (len(m.toolItems) + pageSize - 1) / pageSize
+		if totalPages < 1 {
+			totalPages = 1
+		}
+
+		switch msg.String() {
+		case "up", "k":
+			if m.toolCursor > 0 {
+				m.toolCursor--
+				start := m.toolPage * pageSize
+				if m.toolCursor < start && m.toolPage > 0 {
+					m.toolPage--
+					newStart := m.toolPage * pageSize
+					m.toolCursor = newStart + pageSize - 1
+					if m.toolCursor >= len(m.toolItems) {
+						m.toolCursor = len(m.toolItems) - 1
+					}
+				}
+			}
+			return m, nil
+
+		case "down", "j":
+			if m.toolCursor < len(m.toolItems)-1 {
+				m.toolCursor++
+				end := (m.toolPage + 1) * pageSize
+				if m.toolCursor >= end {
+					if m.toolPage < totalPages-1 {
+						m.toolPage++
+						m.toolCursor = m.toolPage * pageSize
+					} else {
+						m.toolCursor = end - 1 // restore
+					}
+				}
+			}
+			return m, nil
+
+		case "pgup":
+			if m.toolPage > 0 {
+				m.toolPage--
+				m.toolCursor = m.toolPage * pageSize
+			}
+			return m, nil
+
+		case "pgdown":
+			if m.toolPage < totalPages-1 {
+				m.toolPage++
+				m.toolCursor = m.toolPage * pageSize
+			}
+			return m, nil
+
+		case "home", "g":
+			m.toolPage = 0
+			m.toolCursor = 0
+			return m, nil
+
+		case "end", "G":
+			m.toolPage = totalPages - 1
+			m.toolCursor = m.toolPage * pageSize
+			return m, nil
+
+		case "enter", " ":
+			if m.toolCursor < 0 || m.toolCursor >= len(m.toolItems) {
+				return m, nil
+			}
+			name := m.toolItems[m.toolCursor].Name
+			m.screen = ScreenRunningCmd
+			return m, cmdSubcommand(m.agent, m.agent.Tool, "show", "tool", name)
+
+		case "esc", "q":
+			m.toolItems = nil
+			m.toolCursor = 0
+			m.toolPage = 0
+			m.screen = ScreenMainMenu
+			m.err = nil
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// toolListPayload tries to parse a CommandResultPayload as tool list output.
+// Returns true and transitions to ScreenToolList on success.
+func (m *RootModel) toolListPayload(p *protocol.CommandResultPayload) bool {
+	if p == nil || !p.Success || p.Data == "" {
+		return false
+	}
+	items := parseToolList(p.Data)
+	if len(items) == 0 {
+		return false
+	}
+	m.toolItems = items
+	m.toolCursor = 0 // select first tool
+	m.toolPage = 0
+	m.screen = ScreenToolList
+	return true
+}
+
+// parseToolList parses the "dscli tool list" text table output into ToolItem slice.
+// Expected format:
+//
+//	名称                               分类              描述
+//	flycheck                         code_ops        Static analysis check
+//	...
+func parseToolList(data string) []ToolItem {
+	lines := strings.Split(data, "\n")
+	var items []ToolItem
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip header line (contains Chinese chars).
+		if strings.Contains(line, "名称") {
+			continue
+		}
+		// Skip separator lines.
+		if strings.HasPrefix(line, "─") || strings.HasPrefix(line, "-") {
+			continue
+		}
+		// Columns are separated by 2+ spaces.
+		fields := splitByTwoOrMoreSpaces(line)
+		if len(fields) < 2 {
+			continue
+		}
+		item := ToolItem{
+			Name:     fields[0],
+			Category: fields[1],
+		}
+		if len(fields) >= 3 {
+			item.Description = fields[2]
+		}
+		items = append(items, item)
+	}
+	return items
+}
+
 
 // memoryListPayload tries to parse a CommandResultPayload as memory list output.
 // Returns true and transitions to ScreenMemoryList on success.

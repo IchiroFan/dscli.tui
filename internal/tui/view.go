@@ -95,6 +95,8 @@ func (m *RootModel) renderStatusBar() string {
 		screenName = "🛠  Skill"
 	case ScreenMemoryList:
 		screenName = "💾 Memory"
+	case ScreenToolList:
+		screenName = "🧰 Tool"
 	case ScreenAskUser:
 		screenName = "❓ Ask"
 	case ScreenRunningCmd:
@@ -141,6 +143,8 @@ func (m *RootModel) View() string {
 		return m.viewSkillList()
 	case ScreenMemoryList:
 		return m.viewMemoryList()
+	case ScreenToolList:
+		return m.viewToolList()
 	case ScreenQuitting:
 		return "Goodbye.\n"
 	default:
@@ -262,6 +266,8 @@ func (m *RootModel) breadcrumb() string {
 		return "📋 Menu  ›  🛠  Skill"
 	case ScreenMemoryList:
 		return "📋 Menu  ›  💾 Memory"
+	case ScreenToolList:
+		return "📋 Menu  ›  🧰 Tool"
 	case ScreenShowOutput:
 		icon := "📄"
 		if !m.cmdSuccess {
@@ -274,6 +280,8 @@ func (m *RootModel) breadcrumb() string {
 			return "📋 Menu  ›  🛠  Skills  ›  " + icon + "Output"
 		case ScreenMemoryList:
 			return "📋 Menu  ›  💾 Memory  ›  " + icon + "Output"
+		case ScreenToolList:
+			return "📋 Menu  ›  🧰 Tool  ›  " + icon + "Output"
 		case ScreenChatting:
 			return "📋 Menu  ›  💬 Chat  ›  " + icon + "Output"
 		default:
@@ -563,6 +571,100 @@ func (m *RootModel) viewMemoryList() string {
 
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
 }
+
+// ─── Tool List ─────────────────────────────────────────────────
+
+// viewToolList renders the selectable tool list with pagination (10 per page).
+func (m *RootModel) viewToolList() string {
+	var b strings.Builder
+
+	b.WriteString(HeaderStyle.Render(m.breadcrumb()))
+	b.WriteString("\n")
+
+	if len(m.toolItems) == 0 {
+		b.WriteString(NoDataStyle.Render("No tools found."))
+		b.WriteString("\n\n")
+		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
+		b.WriteString("\n")
+		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	}
+
+	// Pagination: fixed 10 per page, capped by terminal height.
+	pageSize := 10
+	maxRows := m.Height - 7
+	if maxRows < 3 {
+		maxRows = 3
+	}
+	if maxRows < pageSize {
+		pageSize = maxRows
+	}
+
+	totalItems := len(m.toolItems)
+	totalPages := (totalItems + pageSize - 1) / pageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	// Clamp current page to valid range.
+	if m.toolPage >= totalPages {
+		m.toolPage = totalPages - 1
+	}
+	if m.toolPage < 0 {
+		m.toolPage = 0
+	}
+
+	start := m.toolPage * pageSize
+	end := start + pageSize
+	if end > totalItems {
+		end = totalItems
+	}
+
+	// ── Page indicator (fixed at top) ──
+	b.WriteString(PageInfoStyle.Render(fmt.Sprintf("Page %d/%d (items %d-%d of %d)",
+		m.toolPage+1, totalPages, start+1, end, totalItems)))
+	b.WriteString("\n")
+
+	// ── Column header ──
+	b.WriteString(HelpStyle.Render(fmt.Sprintf("%-32s %-16s %s",
+		"NAME", "CATEGORY", "DESCRIPTION")))
+	b.WriteString("\n")
+
+	// Clamp cursor to current page.
+	if m.toolCursor >= 0 {
+		if m.toolCursor < start {
+			m.toolCursor = start
+		}
+		if m.toolCursor >= end {
+			m.toolCursor = end - 1
+			if m.toolCursor < start {
+				m.toolCursor = start
+			}
+		}
+	}
+	cursor := m.toolCursor
+
+	for i := start; i < end; i++ {
+		item := m.toolItems[i]
+		// Truncate name and category to fit column widths.
+		name := TruncateStr(item.Name, 30)
+		category := TruncateStr(item.Category, 14)
+		desc := TruncateStr(item.Description, 40)
+		line := fmt.Sprintf("%-32s %-16s %s", name, category, desc)
+
+		if i == cursor {
+			b.WriteString(ListSelectedStyle.Render("▸ " + line))
+		} else {
+			b.WriteString(ListItemStyle.Render("  " + line))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(HelpStyle.Render("↑↓ navigate · PgUp/PgDn page · g/G top/bottom · Enter show · Esc/q back"))
+	b.WriteString("\n")
+
+	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+}
+
 
 // ─── Chatting
 
