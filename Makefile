@@ -11,7 +11,7 @@
 # ─── Project metadata ──────────────────────────────────────────────────────────
 
 BINARY   := dscli-tui
-MODULE   := gitcode.com/dscli/dscli.tui
+MODULE   := github.com/dscli/dscli.tui
 MAIN     := ./cmd/$(BINARY)
 
 # ─── Version injection ─────────────────────────────────────────────────────────

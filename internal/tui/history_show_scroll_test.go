@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"gitcode.com/dscli/dscli.tui/internal/aiagent"
-	"gitcode.com/dscli/dscli.tui/internal/tui/protocol"
+	"github.com/dscli/dscli.tui/internal/aiagent"
+	"github.com/dscli/dscli.tui/internal/tui/protocol"
 )
 
 func TestHistoryShowThenScroll(t *testing.T) {

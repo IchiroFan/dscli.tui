@@ -217,10 +217,10 @@ internal/
 
 ```bash
 # Option 1: go install
-go install gitcode.com/dscli/dscli.tui/cmd/dscli-tui@latest
+go install github.com/dscli/dscli.tui/cmd/dscli-tui@latest
 
 # Option 2: Build from source
-git clone https://gitcode.com/dscli/dscli.tui.git
+git clone https://github.com/dscli/dscli.tui.git
 cd dscli.tui
 make build       # or: go build -o dscli-tui ./cmd/dscli-tui
 make install     # installs to $GOPATH/bin
@@ -348,7 +348,7 @@ Current coverage: `internal/tui/` package — 5 test files, all passing.
 
 Contributions, bug reports, and feature requests are welcome!
 
-- Repository: [gitcode.com/dscli/dscli.tui](https://gitcode.com/dscli/dscli.tui)
+- Repository: [github.com/dscli/dscli.tui](https://github.com/dscli/dscli.tui)
 - Issues: Create an Issue on the repository
 
 Please ensure tests pass before submitting:
@@ -370,7 +370,7 @@ make test
 
 Apache License 2.0
 
-Copyright © 2026 IchiroFan <fanh@pcl.ac.cn>
+Copyright © 2026 JUN JIE NAN <nanjunjie@gmail.com>
 
 ---
 

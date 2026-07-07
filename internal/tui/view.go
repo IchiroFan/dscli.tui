@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"gitcode.com/dscli/dscli.tui/internal/tui/protocol"
+	"github.com/dscli/dscli.tui/internal/tui/protocol"
 )
 
 // ─── Logo ────────────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ package aiagent
 import (
 	"context"
 
-	"gitcode.com/dscli/dscli.tui/internal/tui/protocol"
+	"github.com/dscli/dscli.tui/internal/tui/protocol"
 )
 
 // ─── AIAgent ────────────────────────────────────────────────

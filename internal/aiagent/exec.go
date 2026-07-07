@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"gitcode.com/dscli/dscli.tui/internal/tui/protocol"
-	"gitcode.com/dscli/dscli.tui/pkg/jsonline"
+	"github.com/dscli/dscli.tui/internal/tui/protocol"
+	"github.com/dscli/dscli.tui/pkg/jsonline"
 )
 
 const chunkThreshold = 10           // emit chunk on \n or when this many bytes accumulate (smaller = smoother incremental display)
