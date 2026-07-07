@@ -13,9 +13,9 @@
 
 | 项目 | 路径 | 模块 | 职责 |
 |------|------|------|------|
-| **dscli** | `/home/ichiro/go_project/dscli` | `github.com/dscli/dscli` | CLI 工具，添加 `--json` 模式支持 |
-| **dscli.gitcode** | `/home/ichiro/go_project/dscli.gitcode` | `github.com/dscli/dscli` | 旧合并项目，分离后删除 TUI 代码 |
-| **dscli.tui** | `/home/nanjj/.local/src/github.com/dscli/dscli.tui` | `github.com/dscli/dscli.tui` | **新**独立 TUI 项目（本项目） |
+| **dscli** | - | `github.com/dscli/dscli` | CLI 工具，添加 `--json` 模式支持 |
+| **dscli.gitcode** | - | `github.com/dscli/dscli` | 旧合并项目，分离后删除 TUI 代码 |
+| **dscli.tui** | - | `github.com/dscli/dscli.tui` | **新**独立 TUI 项目（本项目） |
 
 dscli 的 `--json` 模式修改在 dscli 项目的 `feature/chat-json-mode` 分支进行，不在本项目范围内。
 
@@ -140,7 +140,7 @@ dscli v1.0 │ 📁 ~/project │ 🤖 deepseek-chat │ 💬 Chat
 - **聊天滚动**：基于显示行数（而非消息数），`ChatScroll` 从底部向上偏移
 - **`lastChatMaxScroll`**：全局变量缓存 View 中计算的最大滚动值，供键盘 handler 使用
 ## 4. 项目结构
-/home/ichiro/go_project/dscli.tui/
+dscli.tui/
 ├── main.go                      # 入口
 ├── root.go                      # cobra 根命令 + tui 子命令注册
 ├── go.mod                       # 独立 module: github.com/dscli/dscli.tui
