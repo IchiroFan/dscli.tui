@@ -1036,7 +1036,7 @@ func (m *RootModel) memorySearchPayload(p *protocol.CommandResultPayload) {
 	m.memoryItems = nil
 	m.memoryCursor = -1
 	if p != nil && p.Success && p.Data != "" {
-		items := parseMemoryList(p.Data)
+		items := parseMemorySearchResults(p.Data)
 		m.memoryItems = items
 		if len(items) > 0 {
 			m.memoryCursor = 0
@@ -1044,6 +1044,7 @@ func (m *RootModel) memorySearchPayload(p *protocol.CommandResultPayload) {
 	}
 	m.screen = ScreenMemoryList
 }
+
 
 // memoryDatePattern matches date format "Mon DD HH:MM:SS" or "Mon  D HH:MM:SS".
 var memoryDatePattern = regexp.MustCompile(`[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}`)
@@ -1093,6 +1094,51 @@ func parseMemoryList(data string) []MemoryItem {
 	}
 	return items
 }
+
+
+// memorySearchEntryPattern matches each entry header in "dscli memory search" output.
+// Format: "[1] #80 [architecture] dscli.tui chat session: plain-text dscli chat fallback"
+var memorySearchEntryPattern = regexp.MustCompile(`^\[\d+\]\s+#(\d+)\s+\[[^\]]*\]\s+(.*)$`)
+
+// parseMemorySearchResults parses "dscli memory search" output into MemoryItem slice.
+// The search format differs from the list table format:
+//
+//	🔍 找到 N 条记忆:
+//
+//	[1] #ID [Type] Title
+//	    Description lines...
+//	    ISO_DATE | 相关性: score
+//
+//	[2] #ID [Type] Title
+//	    ...
+func parseMemorySearchResults(data string) []MemoryItem {
+	lines := strings.Split(data, "\n")
+	var items []MemoryItem
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// Skip the header line (🔍).
+		if strings.HasPrefix(trimmed, "🔍") {
+			continue
+		}
+		// Match entry header: "[N] #ID [Type] Title"
+		matches := memorySearchEntryPattern.FindStringSubmatch(trimmed)
+		if matches == nil {
+			continue
+		}
+		id := matches[1]
+		title := strings.TrimSpace(matches[2])
+		items = append(items, MemoryItem{
+			ID:    id,
+			Title: title,
+		})
+	}
+	return items
+}
+
 
 // ─── Show Output (scrollable) ────────────────────────────────────
 func (m *RootModel) updateShowOutput(msg tea.Msg) (tea.Model, tea.Cmd) {
