@@ -271,6 +271,9 @@ func (m *RootModel) breadcrumb() string {
 	case ScreenSkillList:
 		return "📋 Menu  ›  🛠  Skill"
 	case ScreenMemoryList:
+		if m.memorySearchQuery != "" {
+			return "📋 Menu  ›  💾 Memory  ›  🔍 Search"
+		}
 		return "📋 Menu  ›  💾 Memory"
 	case ScreenToolList:
 		return "📋 Menu  ›  🧰 Tool"
@@ -507,8 +510,18 @@ func (m *RootModel) viewMemoryList() string {
 	b.WriteString(HeaderStyle.Render(m.breadcrumb()))
 	b.WriteString("\n")
 
+	// Show search query header when in search mode.
+	if m.memorySearchQuery != "" {
+		b.WriteString(TitleStyle.Render(fmt.Sprintf("🔍 Results for: %s", m.memorySearchQuery)))
+		b.WriteString("\n")
+	}
+
 	if len(m.memoryItems) == 0 {
-		b.WriteString(NoDataStyle.Render("No memories found."))
+		if m.memorySearchQuery != "" {
+			b.WriteString(NoDataStyle.Render(fmt.Sprintf("No memories found for query: %s", m.memorySearchQuery)))
+		} else {
+			b.WriteString(NoDataStyle.Render("No memories found."))
+		}
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
@@ -578,7 +591,7 @@ func (m *RootModel) viewMemoryList() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · Esc/q back to menu"))
+	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · / search · Esc/q back to menu"))
 	b.WriteString("\n")
 
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()

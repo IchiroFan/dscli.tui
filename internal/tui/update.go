@@ -173,6 +173,8 @@ func (m *RootModel) updateMainMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.skillCursor = 0
 		m.memoryItems = nil
 		m.memoryCursor = 0
+		m.memorySearchQuery = ""
+
 		m.toolItems = nil
 		m.toolCursor = 0
 		m.toolPage = 0
@@ -324,6 +326,9 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Route list results to specific handlers based on group.
 		if msg.Subcmd == "list" && msg.Group == "skill" && m.skillListPayload(msg.Payload) {
 			// Parsed as skill items — transition to ScreenSkillList.
+		} else if msg.Subcmd == "search" && msg.Group == "memory" {
+			// Route memory search results — always transition to ScreenMemoryList.
+			m.memorySearchPayload(msg.Payload)
 		} else if msg.Subcmd == "list" && msg.Group == "memory" && m.memoryListPayload(msg.Payload) {
 			// Parsed as memory items — transition to ScreenMemoryList.
 		} else if msg.Subcmd == "list" && msg.Group == "tool" && m.toolListPayload(msg.Payload) {
@@ -686,9 +691,24 @@ func (m *RootModel) updateMemoryList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenRunningCmd
 			return m, cmdSubcommand(m.agent, m.agent.Memory, "show", "memory", id)
 
+		case "/", "s":
+			// Enter search mode — AskUser modal for keyword input.
+			m.memorySearchQuery = ""
+			m.prevScreen = ScreenMemoryList
+			m.screen = ScreenAskUser
+			m.askSemantic = protocol.SemanticInput
+			m.askQuestion = "Search memories: (enter keywords)"
+			m.askInput.SetValue("")
+			m.askOptions = nil
+			m.askChoice = 0
+			m.askDone = false
+			m.askResponse = nil
+			return m, nil
+
 		case "esc", "q":
 			m.memoryItems = nil
 			m.memoryCursor = 0
+			m.memorySearchQuery = ""
 			m.screen = ScreenMainMenu
 			m.err = nil
 			return m, nil
@@ -999,11 +1019,30 @@ func (m *RootModel) memoryListPayload(p *protocol.CommandResultPayload) bool {
 	if len(items) == 0 {
 		return false
 	}
+	m.memorySearchQuery = "" // clear any search state
 	m.memoryItems = items
 	m.memoryCursor = 0 // select first memory item
+
 	m.screen = ScreenMemoryList
 	return true
 }
+
+// memorySearchPayload handles "dscli memory search" results.
+// Unlike memoryListPayload, it always transitions to ScreenMemoryList
+// even when results are empty (to show "no results" state).
+func (m *RootModel) memorySearchPayload(p *protocol.CommandResultPayload) {
+	m.memoryItems = nil
+	m.memoryCursor = -1
+	if p != nil && p.Success && p.Data != "" {
+		items := parseMemoryList(p.Data)
+		m.memoryItems = items
+		if len(items) > 0 {
+			m.memoryCursor = 0
+		}
+	}
+	m.screen = ScreenMemoryList
+}
+
 // memoryDatePattern matches date format "Mon DD HH:MM:SS" or "Mon  D HH:MM:SS".
 var memoryDatePattern = regexp.MustCompile(`[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}`)
 
@@ -1537,9 +1576,19 @@ func (m *RootModel) resumeFromAskUser() (tea.Model, tea.Cmd) {
 		return m, cmdSubcommand(m.agent, m.agent.Project, "remove", "project", id)
 	}
 
+	// ── Memory search flow ──────────────────────────────
+	if prev == ScreenMemoryList && askResponse != nil && askResponse.Value != "" {
+		m.memorySearchQuery = askResponse.Value
+		m.memoryItems = nil
+		m.memoryCursor = -1
+		m.cmdTitle = "🔍 Search"
+		m.screen = ScreenRunningCmd
+		return m, cmdSubcommand(m.agent, m.agent.Memory, "search", "memory", askResponse.Value)
+	}
+
 	// Fallback: return to prev screen or main menu.
-	if prev == ScreenProjectList {
-		m.screen = ScreenProjectList
+	if prev == ScreenProjectList || prev == ScreenMemoryList {
+		m.screen = prev
 		return m, nil
 	}
 	m.screen = ScreenMainMenu

@@ -179,8 +179,10 @@ type RootModel struct {
 	skillCursor int         // currently highlighted item index
 
 	// ── Memory list ────────────────────────────────────────────
-	memoryItems  []MemoryItem // parsed from "dscli memory list"
-	memoryCursor int          // currently highlighted item index
+	memoryItems       []MemoryItem // parsed from "dscli memory list"
+	memoryCursor      int          // currently highlighted item index
+	memorySearchQuery string       // non-empty when showing search results
+
 
 	// ── Tool list ─────────────────────────────────────────────
 	toolItems  []ToolItem // parsed from "dscli tool list"
