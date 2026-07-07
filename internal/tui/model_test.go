@@ -47,6 +47,9 @@ func (m *mockAgent) Flycheck(context.Context, string, bool) (*protocol.CommandRe
 func (m *mockAgent) FIM(context.Context, ...string) (*protocol.CommandResultPayload, error) {
 	return nil, nil
 }
+func (m *mockAgent) MemorySearch(context.Context, string) (*protocol.CommandResultPayload, error) {
+	return nil, nil
+}
 func (m *mockAgent) History(context.Context, string, ...string) (*protocol.CommandResultPayload, error) {
 	return nil, nil
 }

@@ -322,13 +322,15 @@ func (m *RootModel) updateRunningCmd(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.Err == nil && msg.Payload != nil && msg.Payload.Success)
 		return m, nil
 
+	case aiagent.MemorySearchResultMsg:
+		// Dedicated handler for memory search results.
+		m.memorySearchPayload(msg.Payload)
+		return m, nil
+
 	case aiagent.SubcommandResultMsg:
 		// Route list results to specific handlers based on group.
 		if msg.Subcmd == "list" && msg.Group == "skill" && m.skillListPayload(msg.Payload) {
 			// Parsed as skill items — transition to ScreenSkillList.
-		} else if msg.Subcmd == "search" && msg.Group == "memory" {
-			// Route memory search results — always transition to ScreenMemoryList.
-			m.memorySearchPayload(msg.Payload)
 		} else if msg.Subcmd == "list" && msg.Group == "memory" && m.memoryListPayload(msg.Payload) {
 			// Parsed as memory items — transition to ScreenMemoryList.
 		} else if msg.Subcmd == "list" && msg.Group == "tool" && m.toolListPayload(msg.Payload) {
@@ -1583,7 +1585,7 @@ func (m *RootModel) resumeFromAskUser() (tea.Model, tea.Cmd) {
 		m.memoryCursor = -1
 		m.cmdTitle = "🔍 Search"
 		m.screen = ScreenRunningCmd
-		return m, cmdSubcommand(m.agent, m.agent.Memory, "search", "memory", askResponse.Value)
+		return m, cmdMemorySearch(m.agent, askResponse.Value)
 	}
 
 	// Fallback: return to prev screen or main menu.

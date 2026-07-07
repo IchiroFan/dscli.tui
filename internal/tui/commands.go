@@ -62,6 +62,15 @@ func cmdSubcommand(agent aiagent.AIAgent, method func(context.Context, string, .
 	}
 }
 
+// cmdMemorySearch searches memories by keyword.
+// Returns a MemorySearchResultMsg.
+func cmdMemorySearch(agent aiagent.AIAgent, query string) tea.Cmd {
+	return func() tea.Msg {
+		p, err := agent.MemorySearch(context.Background(), query)
+		return aiagent.MemorySearchResultMsg{Payload: p, Err: err}
+	}
+}
+
 // ─── Chat command factories ─────────────────────────────────────────
 
 // cmdStartChat spawns a new dscli chat process and returns a

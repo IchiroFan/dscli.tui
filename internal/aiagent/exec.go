@@ -94,6 +94,10 @@ func (a *execAgent) Prompt(ctx context.Context, subcmd string, args ...string) (
 	return a.execDSRaw(ctx, cmdArgs...)
 }
 
+func (a *execAgent) MemorySearch(ctx context.Context, query string) (*protocol.CommandResultPayload, error) {
+	return a.execDSRaw(ctx, "memory", "search", query)
+}
+
 func (a *execAgent) Memory(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error) {
 	cmdArgs := append([]string{"memory", subcmd}, args...)
 	return a.execDSRaw(ctx, cmdArgs...)

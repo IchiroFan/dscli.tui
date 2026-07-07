@@ -39,6 +39,10 @@ type AIAgent interface {
 	// Internally calls: dscli --json-line fim [...args]
 	FIM(ctx context.Context, args ...string) (*protocol.CommandResultPayload, error)
 
+	// MemorySearch searches memories by keyword.
+	// Internally calls: dscli memory search <query>
+	MemorySearch(ctx context.Context, query string) (*protocol.CommandResultPayload, error)
+
 	// ── Subcommand groups ────────────────────────────────
 
 	// History delegates to dscli history <subcmd> [args...].
@@ -85,6 +89,7 @@ type AIAgent interface {
 	// Close releases any resources held by the agent.
 	Close() error
 }
+
 // ─── ChatSessionOptions ─────────────────────────────────────
 
 // ChatSessionOptions configures a chat session.
@@ -163,6 +168,12 @@ type SkillResultMsg struct {
 
 // PromptResultMsg wraps the result of AIAgent.Prompt.
 type PromptResultMsg struct {
+	Payload *protocol.CommandResultPayload
+	Err     error
+}
+
+// MemorySearchResultMsg wraps the result of AIAgent.MemorySearch.
+type MemorySearchResultMsg struct {
 	Payload *protocol.CommandResultPayload
 	Err     error
 }
