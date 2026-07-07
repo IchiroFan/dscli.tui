@@ -23,7 +23,7 @@ Think of it as **dscli with training wheels off** — all the power of the CLI, 
 | **dscli** | Pure CLI backend — AI chat, tool execution, session management |
 | **dscli.tui** | Terminal UI layer — menus, lists, chat bubbles, modal dialogs |
 
-Separation by a clean `AIAgent` interface means each can evolve independently. The TUI never imports dscli internals; they communicate via a JSON-line protocol over stdio.
+Separation by a clean `AIAgent` interface means each can evolve independently. The TUI never imports dscli internals — all communication goes through the interface.
 
 ---
 
@@ -140,9 +140,7 @@ Full-width bottom bar showing at all times:
 │         │   execAgent (stdio)     │           │
 │         └────────────┬────────────┘           │
 └──────────────────────┼───────────────────────┘
-                       │
-              JSON-line protocol
-                       │
+                        │
 ┌──────────────────────┼───────────────────────┐
 │              dscli (subprocess)               │
 └──────────────────────────────────────────────┘
@@ -152,7 +150,6 @@ Full-width bottom bar showing at all times:
 
 - **Single Model** — All state lives in `RootModel`, no sub-models. Screen enumeration (`Screen iota`) dispatches Update/View.
 - **AIAgent Interface** — The TUI never imports dscli packages. All communication goes through `AIAgent` (interface in `internal/aiagent/`).
-- **JSON-line Wire Format** — Messages are JSON objects terminated by `\n`. The shared codec lives in `pkg/jsonline/`.
 - **Screen FSM** — The model is a finite state machine with defined transitions:
 
 ```
@@ -195,9 +192,6 @@ internal/
     └── protocol/        — Wire protocol types
         ├── types.go     — Message, Payload, MessageType
         └── payloads.go  — Concrete payload structs
-pkg/
-└── jsonline/            — JSON-line encoder/decoder (shared codec)
-    └── codec.go
 ```
 
 ---

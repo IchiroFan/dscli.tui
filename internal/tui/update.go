@@ -794,13 +794,6 @@ func (m *RootModel) updateToolList(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toolCursor = m.toolPage * pageSize
 			return m, nil
 
-		case "enter", " ":
-			if m.toolCursor < 0 || m.toolCursor >= len(m.toolItems) {
-				return m, nil
-			}
-			name := m.toolItems[m.toolCursor].Name
-			m.screen = ScreenRunningCmd
-			return m, cmdSubcommand(m.agent, m.agent.Tool, "show", "tool", name)
 
 		case "esc", "q":
 			m.toolItems = nil
