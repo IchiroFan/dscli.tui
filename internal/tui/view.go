@@ -177,9 +177,8 @@ func (m *RootModel) viewMainMenu() string {
 
 	b.WriteString("\n")
 	b.WriteString(HelpStyle.Render("↑↓ navigate • enter select • q quit • ctrl+c exit"))
-	b.WriteString("\n")
-	b.WriteString(m.renderStatusBar())
-	return b.String()
+
+	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
 }
 
 // ─── Running Command ─────────────────────────────────────────────────
@@ -1021,7 +1020,7 @@ func (m *RootModel) viewAskUser() string {
 
 	result := boxStyle.Render(content.String()) + "\n"
 	result += m.renderStatusBar()
-	return result
+	return lipgloss.NewStyle().Background(colorBase).Width(m.Width).Render(result)
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────
