@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/dscli/dscli.tui/internal/aiagent"
 	"github.com/dscli/dscli.tui/internal/tui/protocol"
@@ -271,6 +272,21 @@ func New(agent aiagent.AIAgent) *RootModel {
 	ta.BlurredStyle.Base = ChatInputBaseStyle(false)
 
 	ta.Focus() // focus for text input; ignore cursor cmd
+
+	// Prevent cursor-line highlighting: set uniform background on all
+	// textarea inner styles so they match the theme's Base color.
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle().Background(colorBase)
+	ta.FocusedStyle.Text = lipgloss.NewStyle().Background(colorBase)
+	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle().Background(colorBase)
+	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().
+		Background(colorBase).
+		Foreground(colorSubtext)
+	ta.BlurredStyle.CursorLine = lipgloss.NewStyle().Background(colorBase)
+	ta.BlurredStyle.Text = lipgloss.NewStyle().Background(colorBase)
+	ta.BlurredStyle.EndOfBuffer = lipgloss.NewStyle().Background(colorBase)
+	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().
+		Background(colorBase).
+		Foreground(colorSubtext)
 
 	// ── AskUser single-line input ─────────────────────────────────
 	askInput := textinput.New()

@@ -126,6 +126,21 @@ func (m *RootModel) renderStatusBar() string {
 	return StatusBarBg.Width(m.Width).Render(barText)
 }
 
+// wrapWithFill pads the rendered content with background-filled empty lines
+// so that the content lines + status bar fill exactly the terminal height.
+// The rendered string should already have Background(colorBase) applied.
+func (m *RootModel) wrapWithFill(rendered string) string {
+	L := strings.Count(rendered, "\n") + 1
+	fillNeeded := m.Height - 1 - L
+	if fillNeeded > 0 {
+		fillerStyle := lipgloss.NewStyle().Background(colorBase).Width(m.Width)
+		for i := 0; i < fillNeeded; i++ {
+			rendered += "\n" + fillerStyle.Render(" ")
+		}
+	}
+	return rendered + "\n" + m.renderStatusBar()
+}
+
 // ─── View ────────────────────────────────────────────────────────────
 
 // View implements tea.Model.View.
@@ -179,7 +194,7 @@ func (m *RootModel) viewMainMenu() string {
 	b.WriteString("\n")
 	b.WriteString(HelpStyle.Render("↑↓ navigate • enter select • q quit • ctrl+c exit"))
 
-	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── Running Command ─────────────────────────────────────────────────
@@ -190,8 +205,7 @@ func (m *RootModel) viewRunningCmd() string {
 	b.WriteString("\n")
 	b.WriteString(AppStyle.Width(m.Width).Render(
 		fmt.Sprintf("%s Running command...\n", m.spinner.View())))
-	b.WriteString(m.renderStatusBar())
-	return b.String()
+	return m.wrapWithFill(b.String())
 }
 
 // ─── Show Output ─────────────────────────────────────────────────────
@@ -260,7 +274,7 @@ func (m *RootModel) viewShowOutput() string {
 	b.WriteString(HelpStyle.Render("↑↓ scroll · PgUp/PgDn page · g/G top/bottom · Esc/q back to menu"))
 	b.WriteString("\n")
 
-	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // breadcrumb returns the navigation breadcrumb path.
@@ -326,7 +340,7 @@ func (m *RootModel) viewHistoryList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Pagination: fixed 20 per page, capped by terminal height.
@@ -421,7 +435,7 @@ func (m *RootModel) viewHistoryList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · PgUp/PgDn page · g/G top/bottom · Enter show · Esc/q back"))
 	b.WriteString("\n")
 
-	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── Skill List ─────────────────────────────────────────────────
@@ -438,7 +452,7 @@ func (m *RootModel) viewSkillList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Calculate how many items fit.
@@ -498,7 +512,7 @@ func (m *RootModel) viewSkillList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · Esc/q back to menu"))
 	b.WriteString("\n")
 
-	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── Memory List ─────────────────────────────────────────────────
@@ -525,7 +539,7 @@ func (m *RootModel) viewMemoryList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Calculate how many items fit.
@@ -594,7 +608,7 @@ func (m *RootModel) viewMemoryList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · / search · Esc/q back to menu"))
 	b.WriteString("\n")
 
-	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── Tool List ─────────────────────────────────────────────────
@@ -611,7 +625,7 @@ func (m *RootModel) viewToolList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Pagination: fixed 10 per page, capped by terminal height.
@@ -687,7 +701,7 @@ func (m *RootModel) viewToolList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · PgUp/PgDn page · g/G top/bottom · Esc/q back"))
 	b.WriteString("\n")
 
-	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── Project List ─────────────────────────────────────────────
@@ -704,7 +718,7 @@ func (m *RootModel) viewProjectList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Calculate how many items fit.
@@ -774,7 +788,7 @@ func (m *RootModel) viewProjectList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · g/G top/bottom · Enter details · d delete · Esc/q back"))
 	b.WriteString("\n")
 
-	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 
@@ -938,7 +952,7 @@ func (m *RootModel) viewChatting() string {
 	}
 	b.WriteString("\n")
 
-	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()
+	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── AskUser Modal ───────────────────────────────────────────────────
@@ -1020,9 +1034,9 @@ func (m *RootModel) viewAskUser() string {
 		BorderForeground(colorPrimary).
 		Padding(0, 1)
 
-	result := boxStyle.Render(content.String()) + "\n"
-	result += m.renderStatusBar()
-	return lipgloss.NewStyle().Background(colorBase).Width(m.Width).Render(result)
+	boxContent := boxStyle.Render(content.String())
+	wrapped := lipgloss.NewStyle().Background(colorBase).Width(m.Width).Render(boxContent)
+	return m.wrapWithFill(wrapped)
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────

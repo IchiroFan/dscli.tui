@@ -448,7 +448,7 @@ func initStyles(c Colors) {
 	// ── Status Bar Styles ────────────────────────────────────────────
 
 	StatusBarBg = lipgloss.NewStyle().
-		Background(colorSurface)
+		Background(colorBase)
 
 	StatusVersion = lipgloss.NewStyle().
 		Background(colorMauve).
@@ -457,22 +457,21 @@ func initStyles(c Colors) {
 		Padding(0, 1)
 
 	StatusLabel = lipgloss.NewStyle().
-		Background(colorSurface).
+		Background(colorBase).
 		Foreground(colorSubtext)
 
 	StatusSep = lipgloss.NewStyle().
-		Background(colorSurface).
+		Background(colorBase).
 		Foreground(colorOverlay)
 
 	StatusScreen = lipgloss.NewStyle().
-		Background(colorSurface).
+		Background(colorBase).
 		Foreground(colorPrimary).
 		Bold(true).
 		Padding(0, 1)
-}
+	}
 
 // init applies the default Tokyo Night theme so all package-level style
-// variables are properly initialized before any caller uses them.
 func init() {
 	initStyles(ThemeTokyoNight)
 }
