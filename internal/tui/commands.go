@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -77,9 +78,16 @@ func cmdMemorySearch(agent aiagent.AIAgent, query string) tea.Cmd {
 // ChatSessionReadyMsg when the session is ready.
 func cmdStartChat(agent aiagent.AIAgent, history []ChatLine) tea.Cmd {
 	return func() tea.Msg {
+		// VISUAL 留空让 dscli 的 getEditor() 回退到 EDITOR。
+		// 使用 os.Executable() 获取自身绝对路径，避免依赖 PATH。
+		selfPath, err := os.Executable()
+		editor := "dscli-tui client" // fallback
+		if err == nil {
+			editor = selfPath + " client"
+		}
 		opts := aiagent.ChatSessionOptions{
 			Model: "deepseek-chat",
-			Env:   []string{"EDITOR=dscli-tui client"},
+			Env:   []string{"VISUAL=", "EDITOR=" + editor},
 		}
 		session, err := agent.NewChatSession(context.Background(), opts)
 		if err != nil {

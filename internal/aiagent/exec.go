@@ -12,16 +12,16 @@ import (
 	"time"
 
 	"github.com/dscli/dscli.tui/internal/tui/protocol"
-	"github.com/dscli/dscli.tui/pkg/jsonline"
 )
 
-const chunkThreshold = 10           // emit chunk on \n or when this many bytes accumulate (smaller = smoother incremental display)
+const chunkThreshold = 10                     // emit chunk on \n or when this many bytes accumulate (smaller = smoother incremental display)
 const chunkFlushDelay = 30 * time.Millisecond // min interval between chunk flushes — paces output for smooth streaming
 
 // ─── execAgent ──────────────────────────────────────────────
 
-// execAgent implements AIAgent by executing dscli as a subprocess
-// and communicating via the JSON-line protocol over stdio.
+// execAgent implements AIAgent by executing dscli as a subprocess.
+// Non-interactive commands use raw exec (no protocol flag).
+// Chat uses direct stdin/stdout communication.
 type execAgent struct {
 	dscliPath string // resolved path to dscli binary
 	mu        sync.Mutex
@@ -147,58 +147,6 @@ func (a *execAgent) execDSRaw(ctx context.Context, args ...string) (*protocol.Co
 		Success: true,
 		Data:    output,
 	}, nil
-}
-
-// ── execDS: JSON-line execution (reserved for Phase 4) ──────
-
-// execDS runs dscli with the given args in JSON-line mode and returns
-// the first CommandResultPayload received.  It consumes and discards
-// any StatusPayload or Ready messages before the result.
-//
-// NOTE: Currently unused by non-interactive commands (they use execDSRaw).
-// Kept for Phase 4 when dscli implements --json-line mode.
-func (a *execAgent) execDS(ctx context.Context, args ...string) (*protocol.CommandResultPayload, error) {
-	cmd := exec.CommandContext(ctx, a.dscliPath, args...)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("execDS stdout pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("execDS start: %w", err)
-	}
-	defer cmd.Wait() //nolint:errcheck
-
-	dec := jsonline.NewDecoder(stdout)
-	for dec.Decode() {
-		msg := dec.Message()
-		switch msg.Type {
-		case protocol.TypeCmdResult:
-			p, ok := msg.Payload.(*protocol.CommandResultPayload)
-			if !ok {
-				return nil, fmt.Errorf("unexpected payload type for command_result: %T", msg.Payload)
-			}
-			return p, nil
-
-		case protocol.TypeError:
-			if msg.Error != nil {
-				return nil, msg.Error
-			}
-			return nil, fmt.Errorf("dscli returned error type without details")
-
-		case protocol.TypeReady, protocol.TypeStatus, protocol.TypeGoodbye:
-			// skip — status messages before the result
-
-		default:
-			return nil, fmt.Errorf("unexpected message from dscli: %s", msg.Type)
-		}
-	}
-
-	if err := dec.Err(); err != nil {
-		return nil, fmt.Errorf("execDS read: %w", err)
-	}
-	return nil, fmt.Errorf("dscli exited without returning a result")
 }
 
 // ── Chat ────────────────────────────────────────────────────
