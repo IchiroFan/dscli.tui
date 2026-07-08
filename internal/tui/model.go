@@ -14,7 +14,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/dscli/dscli.tui/internal/aiagent"
-	"github.com/dscli/dscli.tui/internal/socket"
 	"github.com/dscli/dscli.tui/internal/tui/protocol"
 )
 
@@ -204,7 +203,7 @@ type RootModel struct {
 	spinner   spinner.Model
 	spinnerOn bool // true when spinner should be rendered
 
-	// ── AskUser modal ─────────────────────────────────────────────
+	// ── AskUser modal (for memory search, project deletion, etc.) ──
 	prevScreen  Screen // screen to restore after answering
 	askQuestion string
 	askSemantic protocol.Semantic
@@ -213,12 +212,18 @@ type RootModel struct {
 	askChoice   int             // for SemanticChoice (0 = first option)
 	askDone     bool            // true after user has answered
 	askResponse *protocol.AskUserResponsePayload
+
 	// ── Internal flags ────────────────────────────────────────────
 	chatReady bool   // true after first ready event in current exchange
 	cmdTitle  string // display title for current running command (breadcrumb)
 
-	// ── Socket AskUser (bridge from dscli EDITOR subprocess) ──────
-	socketAskReq *socket.AskRequest // non-nil when a socket ask_user is pending
+	// ── AskUser integration in Chat ────────────────────────────────
+	// When dscli asks a question (via socket bridge or chat protocol),
+	// the question is appended to chatHistory and askUserPending is set.
+	// The user's next Enter in Chat is routed to askUserRespond instead
+	// of starting a new chat exchange.
+	askUserPending bool                 // true when dscli expects user input
+	askUserRespond func(string) tea.Cmd // call with user's response, returns cmd to continue
 }
 
 // ─── Menu item definitions ───────────────────────────────────────────

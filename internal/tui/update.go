@@ -57,18 +57,41 @@ func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouseEvent(msg)
 
 	case SocketAskUserMsg:
-		// Save the pending socket request and enter AskUser modal.
-		m.socketAskReq = msg.Request
-		m.askQuestion = msg.Request.Question
-		m.askSemantic = protocol.SemanticInput // default to free-text input
-		m.askOptions = nil
-		m.askInput.SetValue("")
-		m.askInput.Focus()
-		m.askChoice = 0
-		m.askDone = false
-		m.askResponse = nil
-		m.prevScreen = m.screen
-		m.screen = ScreenAskUser
+		// Route through Chat: append the question to chatHistory and set
+		// askUserPending.  The user's next Enter in Chat will be routed
+		// to askUserRespond instead of starting a new chat exchange.
+		// This avoids the visual flashing caused by switching between
+		// ScreenAskUser and ScreenChatting.
+		m.chatHistory = append(m.chatHistory, ChatLine{
+			Role:    "system",
+			Content: "🤖 " + msg.Request.Question,
+		})
+		m.askUserPending = true
+		respCh := msg.Request.RespCh
+		prevWasChat := m.screen == ScreenChatting
+		if !prevWasChat {
+			m.prevScreen = m.screen
+		}
+		m.askUserRespond = func(answer string) tea.Cmd {
+			respCh <- answer
+			m.askUserPending = false
+			m.askUserRespond = nil
+			// Restore previous screen if we switched to Chat for this.
+			if !prevWasChat {
+				m.screen = m.prevScreen
+				m.prevScreen = ScreenMainMenu
+			}
+			return nil
+		}
+		// Suppress chat loading state.
+		m.chatLoading = false
+		m.chatDone = false
+		m.spinnerOn = false
+		// Switch to Chat if not already there.
+		if !prevWasChat {
+			m.screen = ScreenChatting
+			m.chatInput.Focus()
+		}
 		return m, nil
 	}
 
@@ -1344,6 +1367,24 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ── After-loading keyboard handling ──────────────────────────
 		switch msg.String() {
 		case "esc":
+			// If a pending ask_user is active, cancel it by sending
+			// an empty response.  The callback handles cleanup
+			// (sending to RespCh or sending empty via session).
+			if m.askUserPending {
+				m.chatInput.SetValue("")
+				// Don't add to history — user cancelled.
+				cmd := m.askUserRespond("")
+				m.askUserPending = false
+				m.askUserRespond = nil
+				// Close session if any.
+				if m.chatSession != nil {
+					m.chatSession.Close() //nolint:errcheck
+					m.chatSession = nil
+				}
+				m.screen = ScreenMainMenu
+				m.err = nil
+				return m, cmd
+			}
 			// Close session and return to menu — direct transition.
 			if m.chatSession != nil {
 				m.chatSession.Close() //nolint:errcheck
@@ -1354,6 +1395,21 @@ func (m *RootModel) updateChatting(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			input := strings.TrimSpace(m.chatInput.Value())
+
+			// ── Pending ask_user: route response ──────────────
+			if m.askUserPending {
+				m.chatInput.SetValue("")
+				// Add user's answer to chat history.
+				m.chatHistory = append(m.chatHistory, ChatLine{Role: "user", Content: input})
+				// Deliver response via the callback.
+				cmd := m.askUserRespond(input)
+				m.askUserPending = false
+				m.askUserRespond = nil
+				// Scroll to show new message.
+				m.chatScroll = 0
+				return m, cmd
+			}
+
 			// Allow empty messages — user may want to send "continue" signal.
 			// The interleaved chat case (during loading) is handled above.
 
@@ -1441,17 +1497,49 @@ func (m *RootModel) handleChatEvent(msg *protocol.Message) (tea.Model, tea.Cmd) 
 		if !ok {
 			return m, m.waitForMoreChatEvents()
 		}
-		// Enter modal state.
-		m.prevScreen = ScreenChatting
-		m.screen = ScreenAskUser
-		m.askQuestion = p.Question
-		m.askSemantic = p.Semantic
-		m.askOptions = p.Options
-		m.askInput.SetValue("")
-		m.askInput.Focus()
-		m.askChoice = 0
-		m.askDone = false
-		m.askResponse = nil
+		// Build the question text, including options for SemanticChoice.
+		questionText := "🤖 " + p.Question
+		if p.Semantic == protocol.SemanticChoice && len(p.Options) > 0 {
+			for i, opt := range p.Options {
+				questionText += fmt.Sprintf("\n  %d. %s", i+1, opt)
+			}
+		}
+		// Append to chat history instead of switching to ScreenAskUser.
+		m.chatHistory = append(m.chatHistory, ChatLine{
+			Role:    "system",
+			Content: questionText,
+		})
+		m.askUserPending = true
+		session := m.chatSession
+		m.askUserRespond = func(input string) tea.Cmd {
+			m.askUserPending = false
+			m.askUserRespond = nil
+			// Add user's answer to chat history.
+			m.chatHistory = append(m.chatHistory, ChatLine{Role: "user", Content: input})
+			// Build the response payload based on semantic type.
+			resp := &protocol.AskUserResponsePayload{Value: input}
+			if p.Semantic == protocol.SemanticChoice && len(p.Options) > 0 {
+				// Try to match by option text or 1-based index.
+				for i, opt := range p.Options {
+					if input == opt || input == fmt.Sprintf("%d", i+1) {
+						resp = &protocol.AskUserResponsePayload{Choice: i}
+						break
+					}
+				}
+			} else if p.Semantic == protocol.SemanticConfirm {
+				if input == "y" || input == "Y" {
+					resp = &protocol.AskUserResponsePayload{Value: "yes"}
+				} else if input == "n" || input == "N" {
+					resp = &protocol.AskUserResponsePayload{Value: "no"}
+				}
+			}
+			return cmdSendAskUserResponse(session, resp)
+		}
+		// Suppress loading state (AI is waiting for user input).
+		m.chatLoading = false
+		m.chatDone = false
+		m.spinnerOn = false
+		// Stay in ScreenChatting — no screen switch.
 		return m, nil
 
 	case protocol.TypeStatus:
@@ -1605,39 +1693,16 @@ func (m *RootModel) updateAskUserInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// resumeFromAskUser restores the state before the AskUser modal and sends
-// the user's response back to dscli (if coming from chat).
-// Also handles:
-//   - Socket ask_user bridge (from dscli EDITOR subprocess)
+// resumeFromAskUser restores the state before the AskUser modal.
+// Socket and Chat ask_user flows are now handled via the Chat
+// integration (askUserPending + askUserRespond).  This function
+// only handles:
 //   - Project deletion confirmation flow
 //   - Memory search flow
 func (m *RootModel) resumeFromAskUser() (tea.Model, tea.Cmd) {
 	prev := m.prevScreen
 	askResponse := m.askResponse
 	m.prevScreen = ScreenMainMenu
-
-	// ── Socket AskUser flow ──────────────────────────────────
-	// Must be checked before the Chat flow because a socket
-	// ask_user can arrive from any screen (typically Chatting).
-	if m.socketAskReq != nil && askResponse != nil {
-		m.socketAskReq.RespCh <- askResponse.Value
-		m.socketAskReq = nil
-		m.screen = prev
-		// Resume listening for chat events after socket ask_user.
-		// dscli reads the answer from the temp file and continues
-		// emitting events (chat chunks, done) via the protocol.
-		if prev == ScreenChatting && m.chatSession != nil {
-			return m, m.waitForMoreChatEvents()
-		}
-		return m, nil
-	}
-
-	// ── Chat flow ──────────────────────────────────────────
-	if prev == ScreenChatting && m.chatSession != nil && askResponse != nil {
-		m.screen = ScreenChatting
-		m.chatLoading = true // waiting for more events
-		return m, cmdSendAskUserResponse(m.chatSession, askResponse)
-	}
 
 	// ── Project deletion flow ──────────────────────────────
 	if prev == ScreenProjectList && askResponse != nil && askResponse.Value == "yes" && m.projectRemovePendingID != "" {

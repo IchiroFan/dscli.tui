@@ -889,7 +889,11 @@ func (m *RootModel) viewChatting() string {
 	}
 
 	// ── Status / Spinner ──
-	if m.chatLoading {
+	if m.askUserPending {
+		b.WriteString("\n")
+		b.WriteString(ChatLoadingStyle.Render("❓ dscli is waiting for your response..."))
+		b.WriteString("\n")
+	} else if m.chatLoading {
 		b.WriteString("\n")
 		b.WriteString(ChatLoadingStyle.Render(fmt.Sprintf("%s AI is thinking...", m.spinner.View())))
 		b.WriteString("\n")

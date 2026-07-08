@@ -376,7 +376,7 @@ func TestMainMenuBackNavigation(t *testing.T) {
 	m = update(m, navBackToMenuMsg{})
 
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
 	}
 	if m.err != nil {
 		t.Error("err should be cleared on back navigation")
@@ -470,7 +470,7 @@ func TestRunningCmdEsc(t *testing.T) {
 
 	// Esc should return directly to main menu (escape hatch for hung commands).
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
 	}
 	if m.err != nil {
 		t.Error("err should be cleared when returning to menu")
@@ -510,7 +510,7 @@ func TestShowOutputExitKeys(t *testing.T) {
 			m, cmd := updateWithCmd(m, tt.key)
 
 			if m.screen != ScreenMainMenu {
-				t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+				t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
 			}
 			if m.err != nil {
 				t.Error("err should be cleared when returning to menu")
@@ -853,7 +853,7 @@ func TestHistoryListEsc(t *testing.T) {
 	// Esc returns to main menu and clears state.
 	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
 	}
 	if m.err != nil {
 		t.Error("err should be cleared")
@@ -876,7 +876,7 @@ func TestHistoryListQKey(t *testing.T) {
 
 	m, _ = updateWithCmd(m, keyQ)
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu after q", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList after q", m.screen)
 	}
 }
 
@@ -1151,7 +1151,7 @@ func TestSkillListEsc(t *testing.T) {
 	// Esc returns to main menu and clears state.
 	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
 	}
 	if m.err != nil {
 		t.Error("err should be cleared")
@@ -1174,7 +1174,7 @@ func TestSkillListQKey(t *testing.T) {
 
 	m, _ = updateWithCmd(m, keyQ)
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu after q", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList after q", m.screen)
 	}
 }
 
@@ -1433,7 +1433,7 @@ func TestMemoryListEsc(t *testing.T) {
 	// Esc returns to main menu and clears state.
 	m, cmd := updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
 	}
 	if m.err != nil {
 		t.Error("err should be cleared")
@@ -1456,7 +1456,7 @@ func TestMemoryListQKey(t *testing.T) {
 
 	m, _ = updateWithCmd(m, keyQ)
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu after q", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList after q", m.screen)
 	}
 }
 
@@ -1568,7 +1568,7 @@ func TestShowOutputBackToMainMenu(t *testing.T) {
 	// Esc should go to main menu.
 	m, _ = updateWithCmd(m, tea.KeyMsg{Type: tea.KeyEscape})
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
 	}
 }
 
@@ -1860,7 +1860,7 @@ func TestChattingEsc(t *testing.T) {
 
 	// Direct transition: Esc immediately returns to main menu.
 	if m.screen != ScreenMainMenu {
-		t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+		t.Errorf("screen = %d, want ScreenMemoryList", m.screen)
 	}
 	if m.err != nil {
 		t.Error("err should be cleared when returning to menu")
@@ -2180,9 +2180,12 @@ func TestHandleChatDone(t *testing.T) {
 }
 
 func TestHandleAskUser(t *testing.T) {
+	// TypeAskUser is now routed through Chat instead of ScreenAskUser.
 	m := model()
 	m.screen = ScreenChatting
 	m.chatSession = mockSession()
+	m.chatLoading = true
+	m.spinnerOn = true
 
 	msg := &protocol.Message{
 		Type: protocol.TypeAskUser,
@@ -2194,20 +2197,41 @@ func TestHandleAskUser(t *testing.T) {
 	}
 	_, cmd := handleEvent(m, msg)
 
-	if m.screen != ScreenAskUser {
-		t.Errorf("screen = %d, want ScreenAskUser", m.screen)
+	// Screen stays as ScreenChatting (no switch).
+	if m.screen != ScreenChatting {
+		t.Errorf("screen = %d, want ScreenChatting", m.screen)
 	}
-	if m.prevScreen != ScreenChatting {
-		t.Errorf("prevScreen = %d, want ScreenChatting", m.prevScreen)
+	// Question appended to chat history.
+	if len(m.chatHistory) != 1 {
+		t.Fatalf("chatHistory length = %d, want 1", len(m.chatHistory))
 	}
-	if m.askQuestion != "Are you sure?" {
-		t.Errorf("askQuestion = %q", m.askQuestion)
+	if m.chatHistory[0].Role != "system" {
+		t.Errorf("chatHistory[0].Role = %q, want %q", m.chatHistory[0].Role, "system")
 	}
-	if m.askSemantic != protocol.SemanticConfirm {
-		t.Errorf("askSemantic = %s", m.askSemantic)
+	if !strings.Contains(m.chatHistory[0].Content, "Are you sure?") {
+		t.Errorf("chatHistory[0] = %q, should contain question", m.chatHistory[0].Content)
 	}
+	// askUserPending is set.
+	if !m.askUserPending {
+		t.Error("askUserPending should be true")
+	}
+	if m.askUserRespond == nil {
+		t.Error("askUserRespond should be non-nil")
+	}
+	// Loading state suppressed.
+	if m.chatLoading {
+		t.Error("chatLoading should be false")
+	}
+	if m.spinnerOn {
+		t.Error("spinnerOn should be false")
+	}
+	// No modal ask state set.
+	if m.askQuestion != "" {
+		t.Errorf("askQuestion should be empty, got %q", m.askQuestion)
+	}
+	// cmd should be nil (no command to execute, just state change).
 	if cmd != nil {
-		t.Error("expected nil cmd (enter modal)")
+		t.Error("expected nil cmd (routed to chat)")
 	}
 }
 
@@ -2292,8 +2316,8 @@ func TestAskUserConfirm(t *testing.T) {
 		if m.askResponse == nil || m.askResponse.Value != "yes" {
 			t.Errorf("askResponse.Value = %q, want %q", m.askResponse.Value, "yes")
 		}
-		if m.screen != ScreenChatting {
-			t.Errorf("screen should be ScreenChatting, got %d", m.screen)
+		if m.screen != ScreenMainMenu {
+			t.Errorf("screen should be ScreenMainMenu, got %d", m.screen)
 		}
 	})
 
@@ -2505,28 +2529,13 @@ func TestAskUserNonKeyRouting(t *testing.T) {
 }
 
 func TestResumeFromAskUser(t *testing.T) {
-	t.Run("from chat returns to chat and sends response", func(t *testing.T) {
-		m := model()
-		m.prevScreen = ScreenChatting
-		m.chatSession = mockSession()
-		m.askResponse = &protocol.AskUserResponsePayload{Value: "yes"}
-
-		_, cmd := m.resumeFromAskUser()
-
-		if m.screen != ScreenChatting {
-			t.Errorf("screen = %d, want ScreenChatting", m.screen)
-		}
-		if !m.chatLoading {
-			t.Error("chatLoading should be true after resume")
-		}
-		if cmd == nil {
-			t.Error("expected non-nil cmd (send response)")
-		}
-	})
-
-	t.Run("from non-chat returns to main menu", func(t *testing.T) {
+	// resumeFromAskUser now only handles memory search and project deletion
+	// flows. Chat and socket ask_user are handled via Chat integration.
+	// Fallback: any other prevScreen returns to main menu.
+	t.Run("fallback returns to main menu", func(t *testing.T) {
 		m := model()
 		m.prevScreen = ScreenShowOutput
+		m.askResponse = &protocol.AskUserResponsePayload{Value: "yes"}
 
 		_, cmd := m.resumeFromAskUser()
 
@@ -2534,12 +2543,13 @@ func TestResumeFromAskUser(t *testing.T) {
 			t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
 		}
 		if cmd != nil {
-			t.Error("expected nil cmd for non-chat resume")
+			t.Error("expected nil cmd for fallback resume")
 		}
 	})
 }
 
 func TestSocketAskUserMsgHandler(t *testing.T) {
+	// Socket ask_user is now routed through Chat instead of ScreenAskUser.
 	m := model()
 	m.screen = ScreenChatting
 
@@ -2555,115 +2565,105 @@ func TestSocketAskUserMsgHandler(t *testing.T) {
 	updated, cmd := m.Update(msg)
 	m2 := updated.(*RootModel)
 
-	// Verify screen transition.
-	if m2.screen != ScreenAskUser {
-		t.Errorf("screen = %d, want ScreenAskUser", m2.screen)
+	// Verify the question is in chat history.
+	if len(m2.chatHistory) != 1 {
+		t.Fatalf("chatHistory length = %d, want 1", len(m2.chatHistory))
 	}
-	if m2.prevScreen != ScreenChatting {
-		t.Errorf("prevScreen = %d, want ScreenChatting", m2.prevScreen)
+	if m2.chatHistory[0].Role != "system" {
+		t.Errorf("chatHistory[0].Role = %q, want %q", m2.chatHistory[0].Role, "system")
+	}
+	if !strings.Contains(m2.chatHistory[0].Content, "What is your favorite color?") {
+		t.Errorf("chatHistory[0].Content = %q, should contain question", m2.chatHistory[0].Content)
 	}
 
-	// Verify ask state is properly initialized.
-	if m2.askSemantic != protocol.SemanticInput {
-		t.Errorf("askSemantic = %q, want %q", m2.askSemantic, protocol.SemanticInput)
+	// Verify askUserPending state.
+	if !m2.askUserPending {
+		t.Error("askUserPending should be true")
 	}
-	if m2.askQuestion != "What is your favorite color?" {
-		t.Errorf("askQuestion = %q, want %q", m2.askQuestion, "What is your favorite color?")
+	if m2.askUserRespond == nil {
+		t.Error("askUserRespond should be non-nil")
 	}
-	if m2.askOptions != nil {
-		t.Errorf("askOptions = %v, want nil", m2.askOptions)
+
+	// Verify screen stays as ScreenChatting.
+	if m2.screen != ScreenChatting {
+		t.Errorf("screen = %d, want ScreenChatting", m2.screen)
 	}
-	if m2.askChoice != 0 {
-		t.Errorf("askChoice = %d, want 0", m2.askChoice)
+
+	// Verify chat loading state is suppressed.
+	if m2.chatLoading {
+		t.Error("chatLoading should be false")
+	}
+	if m2.spinnerOn {
+		t.Error("spinnerOn should be false")
+	}
+
+	// Verify no modal ask state is set.
+	if m2.askQuestion != "" {
+		t.Errorf("askQuestion should be empty, got %q", m2.askQuestion)
 	}
 	if m2.askDone {
 		t.Error("askDone should be false")
 	}
-	if m2.askResponse != nil {
-		t.Error("askResponse should be nil")
-	}
-	if m2.socketAskReq != req {
-		t.Error("socketAskReq should be set to the request")
-	}
+
+	// Verify cmd is nil (no command to execute).
 	if cmd != nil {
 		t.Error("expected nil cmd from SocketAskUserMsg")
 	}
+
+	// Verify the callback sends to RespCh when called.
+	m2.askUserRespond("blue")
+	select {
+	case ans := <-respCh:
+		if ans != "blue" {
+			t.Errorf("response = %q, want %q", ans, "blue")
+		}
+	default:
+		t.Error("expected response on RespCh")
+	}
+	// After responding, askUserPending should be cleared.
+	if m2.askUserPending {
+		t.Error("askUserPending should be false after response")
+	}
 }
 
-func TestResumeFromAskUserSocketFlow(t *testing.T) {
-	t.Run("sends response via RespCh and resumes chat", func(t *testing.T) {
-		m := model()
-		m.prevScreen = ScreenChatting
-		m.chatSession = mockSession()
-		respCh := make(chan string, 1)
-		m.socketAskReq = &socket.AskRequest{
-			Question: "test?",
-			FilePath: "/tmp/test.md",
-			RespCh:   respCh,
+func TestSocketAskUserFromNonChat(t *testing.T) {
+	// When socket ask_user arrives while not in Chat mode,
+	// it should switch to Chat, then restore the previous screen
+	// after the user responds.
+	m := model()
+	m.screen = ScreenMainMenu
+
+	respCh := make(chan string, 1)
+	req := &socket.AskRequest{
+		Question: "Continue?",
+		FilePath: "/tmp/test.md",
+		RespCh:   respCh,
+	}
+	msg := SocketAskUserMsg{Request: req}
+
+	updated, cmd := m.Update(msg)
+	m2 := updated.(*RootModel)
+
+	// Should switch to Chat.
+	if m2.screen != ScreenChatting {
+		t.Errorf("screen = %d, want ScreenChatting", m2.screen)
+	}
+	_ = cmd
+
+	// Verify the callback restores the previous screen.
+	m2.askUserRespond("yes")
+	if m2.screen != ScreenMainMenu {
+		t.Errorf("after response, screen = %d, want ScreenMainMenu", m2.screen)
+	}
+	// Verify RespCh got the response.
+	select {
+	case ans := <-respCh:
+		if ans != "yes" {
+			t.Errorf("response = %q, want %q", ans, "yes")
 		}
-		m.askResponse = &protocol.AskUserResponsePayload{Value: "my answer"}
-
-		_, cmd := m.resumeFromAskUser()
-
-		// Verify response was sent via RespCh.
-		select {
-		case ans := <-respCh:
-			if ans != "my answer" {
-				t.Errorf("response = %q, want %q", ans, "my answer")
-			}
-		default:
-			t.Error("expected response on RespCh")
-		}
-
-		// Verify screen restored to Chatting.
-		if m.screen != ScreenChatting {
-			t.Errorf("screen = %d, want ScreenChatting", m.screen)
-		}
-
-		// Verify socketAskReq is cleaned up.
-		if m.socketAskReq != nil {
-			t.Error("socketAskReq should be nil after resume")
-		}
-
-		// Verify cmd is non-nil (resumes waiting for chat events).
-		if cmd == nil {
-			t.Error("expected non-nil cmd to resume chat events")
-		}
-	})
-
-	t.Run("from non-chat returns to prev screen without cmd", func(t *testing.T) {
-		m := model()
-		m.prevScreen = ScreenMainMenu
-		respCh := make(chan string, 1)
-		m.socketAskReq = &socket.AskRequest{
-			Question: "test?",
-			FilePath: "/tmp/test.md",
-			RespCh:   respCh,
-		}
-		m.askResponse = &protocol.AskUserResponsePayload{Value: "ok"}
-
-		_, cmd := m.resumeFromAskUser()
-
-		// Verify response was still sent.
-		select {
-		case ans := <-respCh:
-			if ans != "ok" {
-				t.Errorf("response = %q, want %q", ans, "ok")
-			}
-		default:
-			t.Error("expected response on RespCh")
-		}
-
-		// Verify screen restored to prev (main menu).
-		if m.screen != ScreenMainMenu {
-			t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
-		}
-
-		// No chat session, so cmd should be nil.
-		if cmd != nil {
-			t.Error("expected nil cmd for non-chat resume")
-		}
-	})
+	default:
+		t.Error("expected response on RespCh")
+	}
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
