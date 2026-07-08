@@ -2,8 +2,9 @@
 // that decouples the TUI from dscli implementation details.
 //
 // Design principle: all inputs and outputs use Go types (not raw strings).
-// The wire format (JSON-line over stdio) is an internal detail of the
-// implementations in this package and in pkg/jsonline.
+// The wire format (raw stdio for chat, raw exec for commands) is an internal
+// detail of the implementations in this package.
+
 package aiagent
 
 import (
@@ -18,25 +19,24 @@ import (
 // The TUI interacts only through this interface — it never imports dscli packages.
 type AIAgent interface {
 	// ── Non-interactive commands ─────────────────────────
-
 	// Balance returns account balance information.
-	// Internally calls: dscli --json-line balance [--format json]
+	// Internally calls: dscli balance [--format json]
 	Balance(ctx context.Context, format string) (*protocol.CommandResultPayload, error)
 
 	// Models lists available models.
-	// Internally calls: dscli --json-line models [--format json] [--price]
+	// Internally calls: dscli models [--format json] [--price]
 	Models(ctx context.Context, format string, showPrice bool) (*protocol.CommandResultPayload, error)
 
 	// Version returns dscli version info.
-	// Internally calls: dscli --json-line version
+	// Internally calls: dscli version
 	Version(ctx context.Context) (*protocol.CommandResultPayload, error)
 
 	// Flycheck runs static analysis.
-	// Internally calls: dscli --json-line flycheck [--emacs] <path>
+	// Internally calls: dscli flycheck [--emacs] <path>
 	Flycheck(ctx context.Context, path string, emacs bool) (*protocol.CommandResultPayload, error)
 
 	// FIM performs fill-in-the-middle.
-	// Internally calls: dscli --json-line fim [...args]
+	// Internally calls: dscli fim [...args]
 	FIM(ctx context.Context, args ...string) (*protocol.CommandResultPayload, error)
 
 	// MemorySearch searches memories by keyword.
@@ -73,9 +73,8 @@ type AIAgent interface {
 	Service(ctx context.Context, subcmd string, args ...string) (*protocol.CommandResultPayload, error)
 
 	// ── Interactive Chat ─────────────────────────────────
-
 	// NewChatSession creates an interactive chat session.
-	// The session communicates with dscli via JSON-line over stdio.
+	// The session communicates with dscli via raw stdin/stdout.
 	// Returns a ChatSession that the TUI uses to send/receive messages.
 	NewChatSession(ctx context.Context, opts ChatSessionOptions) (*ChatSession, error)
 
@@ -94,11 +93,12 @@ type AIAgent interface {
 
 // ChatSessionOptions configures a chat session.
 type ChatSessionOptions struct {
-	Model      string // model name (default: deepseek-chat)
-	Role       string // system role prompt (dev/expert/review/test)
-	HistSize   int    // number of history messages to include context
-	DscliPath  string // path to dscli executable (empty = use resolved path)
-	ProjectDir string // working directory for the dscli process
+	Model      string   // model name (default: deepseek-chat)
+	Role       string   // system role prompt (dev/expert/review/test)
+	HistSize   int      // number of history messages to include context
+	DscliPath  string   // path to dscli executable (empty = use resolved path)
+	ProjectDir string   // working directory for the dscli process
+	Env        []string // additional environment variables for the dscli process
 }
 
 // ─── ChatSession ────────────────────────────────────────────

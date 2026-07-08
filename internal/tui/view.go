@@ -814,8 +814,11 @@ func (m *RootModel) viewChatting() string {
 
 	// Build rendered bubbles for each chat line.
 	var renderedBubbles []string
-	for _, line := range m.chatHistory {
+	for i, line := range m.chatHistory {
 		var rendered string
+		isLast := i == len(m.chatHistory)-1
+		isStreaming := m.chatLoading && isLast
+
 		switch line.Role {
 		case "user":
 			rendered = RenderBubble(UserBubbleBase, "👤 ", line.Content, wrapStyle, contentAreaW)
@@ -831,8 +834,28 @@ func (m *RootModel) viewChatting() string {
 			}
 		case "assistant":
 			rendered = RenderBubble(AssistantBubbleBase, "🧠 ", line.Content, wrapStyle, contentAreaW)
+			// Stable right border: pad to bubbleMaxW so the right edge never moves.
+			rendered = PadBubbleToWidth(rendered, bubbleMaxW)
+			// During streaming, hide the bottom border until the AI finishes.
+			if isStreaming {
+				bubbleLines := strings.Split(rendered, "\n")
+				if len(bubbleLines) > 1 {
+					bubbleLines = bubbleLines[:len(bubbleLines)-1]
+				}
+				rendered = strings.Join(bubbleLines, "\n")
+			}
 		case "reasoning":
 			rendered = RenderBubble(ThinkBubbleBase, "", line.Content, wrapStyle, contentAreaW)
+			// Stable right border: pad to bubbleMaxW.
+			rendered = PadBubbleToWidth(rendered, bubbleMaxW)
+			// During streaming, hide the bottom border.
+			if isStreaming {
+				bubbleLines := strings.Split(rendered, "\n")
+				if len(bubbleLines) > 1 {
+					bubbleLines = bubbleLines[:len(bubbleLines)-1]
+				}
+				rendered = strings.Join(bubbleLines, "\n")
+			}
 		default:
 			rendered = line.Content
 		}
@@ -889,9 +912,13 @@ func (m *RootModel) viewChatting() string {
 	}
 
 	// ── Status / Spinner ──
-	if m.chatLoading {
+	if m.askUserPending {
 		b.WriteString("\n")
-		b.WriteString(ChatLoadingStyle.Render(fmt.Sprintf("%s AI is thinking...", m.spinner.View())))
+		b.WriteString(ChatLoadingStyle.Render("❓ dscli is waiting for your response..."))
+		b.WriteString("\n")
+	} else if m.chatLoading {
+		b.WriteString("\n")
+		b.WriteString(ChatLoadingStyle.Render(fmt.Sprintf("%s AI is thinking...  [Ctrl+S stop]", m.spinner.View())))
 		b.WriteString("\n")
 	} else if m.chatDone {
 		b.WriteString("\n")
@@ -904,7 +931,11 @@ func (m *RootModel) viewChatting() string {
 	b.WriteString(m.chatInput.View())
 	b.WriteString("\n")
 
-	b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • PgUp/PgDn/Ctrl↑↓: scroll"))
+	if m.chatLoading {
+		b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • Ctrl+S: stop • PgUp/PgDn: scroll"))
+	} else {
+		b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • PgUp/PgDn/Ctrl↑↓: scroll"))
+	}
 	b.WriteString("\n")
 
 	return AppStyle.Width(m.Width).Render(b.String()) + "\n" + m.renderStatusBar()

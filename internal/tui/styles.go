@@ -300,6 +300,19 @@ var (
 
 // ─── Bubble Rendering ───────────────────────────────────────────────────────
 
+// PadBubbleToWidth right-pads each line of a rendered bubble string with spaces
+// so the total visual width equals targetW (excluding ANSI sequences).
+// This ensures all bubbles on the same side have a stable right border position.
+func PadBubbleToWidth(s string, targetW int) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lw := lipgloss.Width(line)
+		if pad := targetW - lw; pad > 0 {
+			lines[i] = line + strings.Repeat(" ", pad)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
 // RenderBubble renders a chat bubble with proper word-wrapping.
 //
 // In lipgloss v1.1.0, MaxWidth incorrectly truncates content instead of

@@ -14,7 +14,6 @@
 | 项目 | 路径 | 模块 | 职责 |
 |------|------|------|------|
 | **dscli** | - | `github.com/dscli/dscli` | CLI 工具，添加 `--json` 模式支持 |
-| **dscli.gitcode** | - | `github.com/dscli/dscli` | 旧合并项目，分离后删除 TUI 代码 |
 | **dscli.tui** | - | `github.com/dscli/dscli.tui` | **新**独立 TUI 项目（本项目） |
 
 dscli 的 `--json` 模式修改在 dscli 项目的 `feature/chat-json-mode` 分支进行，不在本项目范围内。
@@ -151,8 +150,8 @@ dscli.tui/
 │   │   ├── resolve.go           #   dscli 路径查找（执行版验证）
 │   │   └── agent_test.go
 │   ├── tui/
-│   │   ├── protocol/            # JSON-line 协议类型定义（最终将移至 dscli）
-│   │   │   ├── types.go         #   Message, MessageType, Payload sealed interface
+│   │   ├── protocol/            # 消息类型定义（AIAgent 接口的输入输出载体）
+│   │   │   ├── types.go         #   Message, MessageType, Payload 密封接口
 │   │   │   └── payloads.go      #   ChatRequest, ChatChunk, AskUser, Command 等负载
 │   │   ├── tui.go               #   Model 定义 + Init + New
 │   │   ├── update.go            #   Update 方法
@@ -162,9 +161,6 @@ dscli.tui/
 │   │   └── tui_test.go
 │   └── types/                   # 通用类型（不与 dscli 绑定）
 │       └── types.go
-├── pkg/
-│   └── jsonline/                # JSON-line 编解码器（最终移至 dscli）
-│       └── codec.go
 └── docs/
     └── adr/                     # 架构决策记录
 
@@ -175,7 +171,6 @@ dscli.tui/
 - 每个方法对应一个 dscli **顶级子命令**
 - 输入输出使用 `protocol.*Payload` 类型（而非 `string`），提供编译期类型安全
 - TUI 只依赖 `aiagent.AIAgent` 接口和 `protocol` 包，**不依赖 dscli 的任何内部包**
-- 通信协议（JSON-line）和协议类型最终将定义在 dscli 项目中，dscli.tui 是遵循者
 
 ### 5.2 接口定义
 
@@ -224,7 +219,7 @@ type AIAgent interface {
     // ─── 交互式对话 ─────────────────────────────────────
 
     // NewChatSession 创建交互式聊天会话。
-    // 使用 JSON-line 协议通过 stdio 与 dscli chat --json 通信。
+    // 通过 stdin/stdout 与 dscli chat 子进程通信。
     NewChatSession(ctx context.Context, opts ChatSessionOptions) (*ChatSession, error)
 }
 ```
@@ -373,13 +368,11 @@ func resolveDSCLIPath(hint string) string {
 
 AIAgent 的唯一外部依赖是 `os/exec` — **不导入任何 dscli 包**。
 
-### 6.4 Raw Exec 回退方案（当前阶段使用）
-
-当前 `execAgent` 所有方法都使用 `--json-line` 标志与 dscli 通信。但 dscli master 分支尚不支持此标志（将在 Phase 4 实现）。为了让所有非交互菜单项立即可用，添加 Raw Exec 回退：
+### 6.4 Raw Exec 执行方案（永久方案）
+非交互命令（Balance, Models, History 等）采用 **Raw Exec** 方式：直接执行 `dscli <args>`，捕获 stdout+stderr，包裹为 `CommandResultPayload` 返回。**不依赖 `--json-line` 标志**。
 
 ```go
 // execDSRaw 直接执行 dscli <args> 并返回原始文本输出。
-// 不依赖 --json-line 标志，适用于所有非交互命令。
 func (a *execAgent) execDSRaw(ctx context.Context, args ...string) (*protocol.CommandResultPayload, error) {
     cmd := exec.CommandContext(ctx, a.dscliPath, args...)
     out, err := cmd.CombinedOutput()
@@ -398,153 +391,91 @@ func (a *execAgent) execDSRaw(ctx context.Context, args ...string) (*protocol.Co
 ```
 
 **策略**：
-1. 所有非交互命令（Balance, Models, Version 等）直接用 `execDSRaw` 替换 `execDS`，不再使用 `--json-line`
-2. `execDS()`（JSON-line 路径）保留但不调用，等待 Phase 4 启用
-3. ChatSession 保持 JSON-line 路径不变，待 Phase 4 dscli 实现 `--json-line` 后再联调
+1. 所有非交互命令使用 `execDSRaw`，不使用 JSON-line 协议
+2. `execDS()`（旧 JSON-line 路径）保留但不再调用，仅作参考
+3. ChatSession 使用直接 stdin/stdout 通信（见 §7），不依赖任何协议标志
 
-**优点**：零架构改动，所有菜单项立即可用，无需等待 dscli 的 `--json-line` 模式。
+**优点**：零额外依赖，所有菜单项不受 dscli 协议版本影响。
 
-## 7. Chat JSON-line 协议（dscli.tui 视角）
+## 7. Chat 通信协议（dscli.tui 视角）
 
-### 7.1 为什么需要 JSON-line 协议
+### 7.1 会话生命周期
 
-dscli 的 `ask_user` 工具调用当前通过打开编辑器（vim/nano）获取用户输入。在 TUI 中不能打开编辑器，需要：
-1. dscli 输出问题 → TUI 显示模态框
-2. TUI 获取用户输入 → 发送回复给 dscli
-3. dscli 恢复对话循环
+Chat 会话采用单轮问答模式（one-shot exchange）：
 
-JSON-line over stdio 是实现此交互的最简洁方式。
+1. TUI 通过 `AIAgent.NewChatSession()` 创建 `ChatSession`
+2. dscli 子进程启动后立即就绪（发射 `TypeReady`）
+3. TUI 发送用户消息（`ChatRequestPayload`），关闭 stdin 信号 EOF
+4. dscli 处理请求，输出响应到 stdout
+5. TUI 按字节读取 stdout，以固定阈值切分后通过 channel 发射 `ChatChunkPayload`
+6. 读取完毕（EOF）后发射 `ChatDonePayload`
+7. dscli 进程退出，`cmd.Wait()` 收集退出码
 
-### 7.2 协议概览
+**关键设计**：不依赖 dscli 的 `--json` 或 `--json-line` 标志，直接与 `dscli chat` 的标准 stdin/stdout 通信。
 
-dscli 以 `dscli chat --json` 启动，通过 stdio 交换 JSON lines。
+### 7.2 流式输出机制
 
-#### Stdout（dscli → TUI）
+dscli chat 默认一次性输出完整响应（非流式 API）。TUI 通过**字节级读取 + 固定阈值切分**实现增量显示：
 
-| 类型 | 触发时机 | 字段 |
-|------|---------|------|
-| `delta` | 流式输出每个 chunk | `role`, `content` |
-| `content` | 完整响应（含工具调用标志） | `role`, `content`, `reasoning`, `tool_calls` |
-| `tool_call` | 响应包含工具调用 | `tool_calls[]` |
-| `ask_user` | ask_user 工具需要用户输入 | `tool_call_id`, `question`, `timeout` |
-| `tool_result` | 工具执行完毕 | `tool_call_id`, `name`, `result`, `success` |
-| `done` | 回合结束 | `usage` |
-| `error` | 致命错误 | `message` |
-
-#### Stdin（TUI → dscli）
-
-| 类型 | 触发时机 | 字段 |
-|------|---------|------|
-| `message` | 用户发送新消息 | `content` |
-| `tool_result` | 用户回复 ask_user 问题 | `tool_call_id`, `content` |
-| `cancel` | 用户取消当前回合 | — |
-
-### 7.3 ask_user 三种响应语义
-
-| 用户操作 | 消息类型 | 含义 | dscli 行为 |
-|---------|---------|------|-----------|
-| 输入内容后按 Enter | `MsgToolResult` + 非空 `Content` | 用户回答了问题 | 正常继续工具执行 |
-| 直接按 Enter（内容空） | `MsgToolResult` + 空 `Content` | 回答了但内容为空 | 空字符串作为合法工具结果传给 DeepSeek |
-| 按 Esc | `MsgCancel` | 取消本轮 | **终止当前 ChatRound** |
-| 超时（dscli 侧） | —（内部检测） | 用户没回应 | **以 error 终止 ChatRound** |
-
-### 7.4 完整 ask_user 交互序列
-
-```
-dscli                                TUI
-  │                                    │
-  │── stdout: {"type":"content",...}   │  显示助手消息
-  │── stdout: {"type":"tool_call",..}  │  显示工具调用信息
-  │                                    │
-  │── stdout: {"type":"ask_user",      │
-  │     "tool_call_id":"call_1",       │
-  │     "question":"标准库还是 Gin?",  │
-  │     "timeout":60}                  │
-  │                                    │
-  │                                    │── 显示模态框 + 倒计时
-  │                                    │   ╭─────────────────────╮
-  │                                    │   │ 🤖 AI 询问:         │
-  │                                    │   │ 标准库还是 Gin?      │
-  │                                    │   │                     │
-  │                                    │   │ > [用户输入]        │
-  │                                    │   │ [Enter] 发送 [Esc]取消│
-  │                                    │   ╰─────────────────────╯
-  │                                    │
-  │  ┌─ 场景 A：用户回答 ───────────┐  │
-  │  │  stdin: {"type":"tool_result",│  │
-  │  │    "tool_call_id":"call_1",   │  │  ← 用户输入 "Gin" 按 Enter
-  │  │    "content":"Gin"}           │  │
-  │  │  handleAskUser 返回 content   │  │  dscli 继续执行
-  │  │  stdout: {"type":"tool_result",│  │
-  │  │    "tool_call_id":"call_1",   │  │
-  │  │    "name":"ask_user",         │  │
-  │  │    "result":"Gin","success":true}│  │
-  │  │  (继续 ChatRound)             │  │
-  │  └───────────────────────────────┘  │
-  │                                    │
-  │  ┌─ 场景 B：用户按 Esc ─────────┐  │
-  │  │  stdin: {"type":"cancel"}     │  │  ← 用户按 Esc
-  │  │  dscli 检测取消信号           │  │
-  │  │  stdout: {"type":"error",     │  │
-  │  │    "message":"cancelled"}     │  │
-  │  │  ChatRound 终止               │  │
-  │  └───────────────────────────────┘  │
-  │                                    │
-  │  ┌─ 场景 C：超时 ────────────────┐  │
-  │  │  dscli 读取 stdin 超时（60s）  │  │  TUI 超时提示
-  │  │  stdout: {"type":"error",     │  │
-  │  │    "message":"ask_user timeout"}│  │
-  │  │  ChatRound 终止               │  │
-  │  └───────────────────────────────┘  │
+```go
+const chunkThreshold = 10           // 积累 10 字节或遇到 \n 时发射 chunk
+const chunkFlushDelay = 30 * time.Millisecond // chunk 间最小间隔，控制输出节奏
 ```
 
-### 7.5 ChatSession 内部实现
+- 使用 `bufio.NewReader(stdout).ReadByte()` 逐字节读取
+- 每积累 `chunkThreshold` 字节或遇到 `\n` 即发射一个 chunk
+- 两次 chunk 间 sleep `chunkFlushDelay`，避免 burst 导致 TUI 渲染阻塞
+- 这种方式即使对于无换行的长文本也能平滑增量显示
+
+### 7.3 AskUser 交互语义
+
+dscli 的 `ask_user` 工具调用通过 `$EDITOR` 环境变量打开编辑器获取用户输入。TUI 将 EDITOR 替换为自身的 socket 客户端，桥接回 TUI 模态框。
+
+三种响应语义（socket 桥接的详细协议见 §12）：
+
+| 用户操作 | 语义 | dscli 行为 |
+|---------|------|-----------|
+| 输入内容后按 Enter | 用户回答了问题 | 正常继续工具执行 |
+| 直接按 Enter（内容空） | 回答了但内容为空 | 空字符串作为合法工具结果传给 DeepSeek |
+| 按 Esc | 取消本轮 | **终止当前 ChatRound** |
+| 超时（300s） | 用户没回应 | 以 error 终止 ChatRound |
+
+### 7.4 ChatSession 核心实现
 
 ```go
 func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions) (*ChatSession, error) {
-    args := []string{"chat", "--json", "--role", opts.Role}
-    if opts.Stream {
-        args = append(args, "--stream")
-    }
-
+    args := []string{"chat"}
     ctx, cancel := context.WithCancel(ctx)
     cmd := exec.CommandContext(ctx, a.dscliPath, args...)
     cmd.Dir = opts.ProjectDir
+    cmd.Env = append(os.Environ(), opts.Env...)
 
     stdin, _ := cmd.StdinPipe()
     stdout, _ := cmd.StdoutPipe()
-    stderr, _ := cmd.StderrPipe()
+    cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
-    events := make(chan ChatEvent, 100)
-    sendCh := make(chan ChatMessage, 10)
+    cmd.Start()
+
+    events := make(chan *protocol.Message, 3)
+    sendCh := make(chan *protocol.Message, 10)
     done := make(chan struct{})
-
-    if err := cmd.Start(); err != nil {
-        cancel()
-        return nil, fmt.Errorf("start dscli chat --json: %w", err)
-    }
-
-    go readEvents(stdout, events, done)
-    go writeMessages(stdin, sendCh, done)
-    go io.Copy(os.Stderr, stderr)
+    waitDone := make(chan error, 1)
 
     go func() {
-        cmd.Wait()
-        close(done)
-        cancel()
+        // 1. Emit TypeReady
+        // 2. Wait for ChatRequestPayload from TUI
+        // 3. Write user message to stdin, close stdin → EOF
+        // 4. Read stdout byte-by-byte, emit ChatChunkPayload per chunkThreshold
+        // 5. On EOF, emit ChatDonePayload
+        // 6. cmd.Wait(), report exit code
     }()
 
-    return &ChatSession{
-        Events: events,
-        Send:   sendCh,
-        Done:   done,
-        close: func() error {
-            cancel()
-            return cmd.Wait()
-        },
-    }, nil
+    return &ChatSession{Events: events, Send: sendCh, Done: done,
+        close: func() error { cancel(); return <-waitDone }}
 }
 ```
+
+完整实现见 `internal/aiagent/exec.go`。AskUser socket 桥接见 §12。
 
 ## 8. TUI Model 改造
 
@@ -557,7 +488,7 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 | `[]dsc.Model` | `string` |
 | `[]*prompt.Message` | `string` |
 | `startChatStream(ctx, client, input, ch)` | `session := agent.NewChatSession(...)` |
-| 工具调用在 goroutine 中自动执行 | JSON-line 协议内部处理 |
+| 工具调用在 goroutine 中自动执行 | socket 桥接 / 主 goroutine 处理 |
 | 无 `ask_user` 支持 | `EventAskUser` → TUI 模态框 |
 
 ### 8.2 Model 新结构
@@ -773,26 +704,24 @@ func (m Model) fetchBalance() tea.Cmd {
 ### 10.1 Phase 1: 基础设施 ✓
 - [x] 初始化 `dscli.tui` go.mod + 骨架
 - [x] 定义 `tui/protocol` 协议类型（Message, Payload, 所有负载类型）
-- [x] 实现 `pkg/jsonline` JSON-line 编解码器
 - [x] 实现 `aiagent.AIAgent` 接口定义（使用 `protocol.*Payload` 类型返回）
-- [x] 实现 `aiagent.execAgent` 非交互命令 + ChatSession（使用 `--json-line` 协议）
+- [x] 实现 `aiagent.execAgent` 非交互命令 + ChatSession
 - [x] 实现 `aiagent.resolveDSCLIPath`（dscli version 验证）
 - [x] 移植 TUI 核心框架（Model + Init + Update + View + 6 屏幕路由）
 - [x] Screen 枚举 / textinput / spinner / 滚动支持
 - [x] 单元测试 30 个，全部通过
 - [x] Logo（渐变 ASCII art + 双线边框，与 dscli.gitcode 一致）
-- ⚠️ **注意**：当前所有命令使用 `--json-line` 标志，但 dscli master 分支尚未实现。
 
-### 10.2 Phase 2: 显示 dscli 原始输出（当前阶段）
-**目标**：在不依赖 `--json-line` 的前提下，让 TUI 各菜单项能调用 `dscli <subcmd>` 并展示原始输出。
-**方案**：在 `execAgent` 中添加 `execDSRaw()` 回退方法，直接执行 `dscli <args>` 捕获 stdout/stderr。
+### 10.2 Phase 2: 显示 dscli 原始输出 ✓
+**目标**：让 TUI 各菜单项能调用 `dscli <subcmd>` 并展示原始输出。
+**方案**：在 `execAgent` 中使用 `execDSRaw()` 直接执行 `dscli <args>` 捕获 stdout/stderr。
 - [x] 添加 `execDSRaw(ctx, args...)` 方法，返回 `*CommandResultPayload`
-- [x] 修改 `Balance()` / `Models()` / `Version()` / `Flycheck()` / `FIM()` 使用 raw fallback
-- [x] 修改所有子命令（History/Skill/Prompt/Memory/Project/Role/Tool/Mail/Service）使用 raw fallback
+- [x] 修改 `Balance()` / `Models()` / `Version()` / `Flycheck()` / `FIM()` 使用 raw exec
+- [x] 修改所有子命令（History/Skill/Prompt/Memory/Project/Role/Tool/Mail/Service）使用 raw exec
 - [x] 更新 `formatCommandResult()` 适配原始文本输出
 - [x] 验证所有非交互菜单项（1-13）可正常显示 dscli 输出
 - [x] 错误处理：dscli 未安装、命令执行失败
-- [x] 更新测试覆盖 raw fallback 路径
+- [x] 更新测试覆盖 raw exec 路径
 - [x] Status Bar（底部显示版本 / 项目路径 / 模型 / 屏幕名）
 - [x] Chat 气泡（UserBubbleBase / AssistantBubbleBase 边框）
 - [x] Chat 输入框蓝色边框
@@ -800,15 +729,20 @@ func (m Model) fetchBalance() tea.Cmd {
 - [x] AskUser 模态框 lipgloss 美化（替代 ASCII 手绘框）
 - [x] 帮助栏完善
 
-### 10.4 Phase 4: 交互式对话（依赖 dscli --json-line）
-**注意**：以下任务依赖 dscli 项目的 `feature/chat-json-mode` 分支实现 `--json-line` 模式。
-对 dscli `--json` 的修改将在此阶段进行。AskUser 也在此阶段启用。
 
-- [ ] dscli 项目：实现 `--json-line` 全局标志
-- [ ] dscli 项目：实现 `chat --json-line` 交互模式（含 ask_user 支持）
-- [ ] 启用 `aiagent.ChatSession`（JSON-line over stdio 读写循环）
-- [ ] 启用 AskUser 模态框（三种语义：Confirm / Choice / Input）
-- [ ] Chat 屏幕完整联调（流式增量 / replaceLast / 事件处理）
+### 10.4 Phase 4: 交互式对话（当前阶段）
+
+**目标**：实现 TUI Chat 屏幕与 dscli chat 进程的完整交互，包括流式输出、多轮对话和 AskUser 支持。
+
+**方案**：dscli chat 以非 JSON-line 模式启动（`dscli chat`），通过 stdin/stdout 进行单轮问答。
+
+- [x] `aiagent.ChatSession` 骨架（stdin/stdout 读写循环）
+- [x] 流式输出（byte-by-byte chunk 读取 + chunkFlushDelay 节流）
+- [x] Chat 屏幕 UI（气泡渲染、输入框、滚动）
+- [x] AskUser 模态框 UI（三种语义：Confirm / Choice / Input）
+- [ ] Chat 屏幕完整联调（多轮对话、错误恢复）
+- [ ] AskUser 通过 Unix socket 桥接回 TUI（见 §12）
+
 
 ### 10.5 Phase 5: 剩余屏幕 + 完善
 - [ ] 移植剩余屏幕（Project / Role / Tool / Mail / Service / Flycheck 详情视图）
@@ -822,9 +756,368 @@ func (m Model) fetchBalance() tea.Cmd {
 | dscli 不在 PATH 中 | 启动时报错 + 提示配置 `DSCLI_PATH` |
 | `dscli version` 执行失败 | 视为 dscli 未安装，报错 |
 | ChatSession 中断 | 返回 `EventError`，TUI 显示错误提示 |
-| ask_user 超时 | dscli 侧检测 → error 事件 → 终止 ChatRound |
-| ask_user 取消（Esc） | TUI 发送 `MsgCancel` → dscli error → 终止 ChatRound |
+| ask_user（Socket 路径）| dscli 启动 `dscli-tui client` → Unix socket → TUI 模态框 → 写回文件 |
+| Socket 文件不存在 | 客户端退出码非零，dscli 认为编辑器失败，ask_user 返回 error |
+| 用户按 Esc 取消 | Socket 返回空内容，dscli 读回空字符串作为工具结果 |
+| Socket 超时（300s） | 服务端关闭连接，客户端写空内容退出，ask_user 返回 error |
 | ask_user 空回复 | 用户未输入内容但按 Enter → 空字符串作为合法工具结果 |
 | 多个 ask_user 同时 | 当前设计不支持——一轮只有一个 ask_user（串行执行） |
 | dscli 版本不兼容 | 接口方法兼容：增加方法不破坏旧版本 |
 | 终端尺寸过小 | TUI 已有最小尺寸保护逻辑 |
+
+
+## 12. AskUser 通过 Unix Socket 桥接回 TUI
+
+### 12.1 背景与动机
+
+dscli 的 `ask_user` 工具调用通过 `$EDITOR` 环境变量打开外部编辑器：
+1. 创建临时文件（如 `/tmp/dscli_editor_xxx.md`）
+2. 将问题内容写入文件
+3. 启动 `$EDITOR <file>`，等待编辑器退出
+4. 读取编辑后的文件内容作为用户回复
+
+在 TUI 环境中不能直接打开终端编辑器（会破坏 Bubble Tea 的渲染）。本方案利用 `$EDITOR` 机制，将编辑器替换为一个 **Unix socket 客户端**，将编辑操作桥接回 TUI 的模态框。
+
+### 12.2 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ dscli.tui (Bubble Tea)                                      │
+│                                                             │
+│  ┌──────────┐  ┌──────────────┐  ┌────────────────────┐    │
+│  │  TUI      │  │  Socket      │  │  dscli chat        │    │
+│  │  Model    │◄─┤  Service     │  │  (子进程)           │    │
+│  │           │  │  (goroutine) │  │                    │    │
+│  │  Screen   │  │              │  │  $EDITOR =         │    │
+│  │  AskUser  │  │  .dscli/     │  │  dscli-tui client  │    │
+│  │           │  │  dscli-tui   │  │                    │    │
+│  │           │  │  .sock       │  │  ask_user → exec   │    │
+│  └──────────┘  └──────┬───────┘  │  dscli-tui client   │    │
+│                        │         │  /tmp/xxx.md        │    │
+│                        │         └────────┬───────────┘    │
+│                        │  Unix socket     │                │
+│                        └──────────────────┘                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 12.3 交互序列
+
+```
+dscli chat                        TUI Socket Service
+    │                                    │
+    │  (ask_user 工具调用)                │
+    │                                    │
+    │  1. 创建临时文件                    │
+    │     /tmp/dscli_editor_xxx.md       │
+    │     内容 = 问题内容                 │
+    │                                    │
+    │  2. exec dscli-tui client          │
+    │     /tmp/dscli_editor_xxx.md       │
+    │     (因为 EDITOR=dscli-tui client) │
+    │                                    │
+    │  ┌─ 客户端 (子进程) ──────────┐    │
+    │  │ 3. 读取文件内容            │    │
+    │  │ 4. 连接 Unix socket        │    │
+    │  │ 5. 发送 request            │────│──── 6. 收到消息
+    │  │    {question, file}        │    │     发送 SocketAskUserMsg
+    │  │                            │    │     等待响应
+    │  │                            │    │
+    │  │                            │    │     ┌─ TUI ───────────┐
+    │  │                            │    │     │ 7. ScreenAskUser │
+    │  │                            │    │     │    模态框        │
+    │  │                            │    │     │ 8. 用户输入      │
+    │  │                            │    │     │ 9. Enter → 响应  │
+    │  │                            │    │     └─────────────────┘
+    │  │                            │◄───│──── 10. 返回 response
+    │  │ 11. 追加响应到文件         │    │
+    │  │ 12. 退出（exit 0）         │    │
+    │  │ ──────────────────────────┘    │
+    │                                    │
+    │  13. dscli 读取文件内容            │
+    │     作为 ask_user 结果             │
+    │                                    │
+    │  14. 继续 ChatRound                │
+```
+
+### 12.4 Socket 协议
+
+#### Socket 文件位置
+
+```
+<project-root>/.dscli/dscli-tui.sock
+```
+
+通过 `findGitRoot(cwd)` 或 `os.Getwd()` 确定项目根目录（与 dscli 的 `GetProjectRoot` 逻辑一致）。
+
+#### Request 格式（纯文本，两行）
+
+发送方（socket client，即 EDITOR 子进程）按以下格式写入连接：
+
+```text
+<question 文本>
+<file path>
+```
+
+- 第一行：dscli 的 `ask_user` 工具写入临时文件的内容，即待回答的问题
+- 第二行：临时文件的绝对路径，用于后续服务端将用户响应写回文件
+
+两行均以 `\n` 结尾。服务端使用 `bufio.Scanner` 或类似方式读取两行。
+
+#### Response 格式（纯文本，剩余所有内容）
+
+服务端将用户通过 TUI 模态框输入的内容原样写回连接（可能多行），客户端在连接关闭后读取全部内容：
+
+```text
+<用户输入的响应内容，可能包含多行>
+```
+
+服务端写入完成后关闭连接。客户端通过 `io.ReadAll(conn)` 或 `bufio.Reader` 读取全部内容。
+
+
+### 12.5 包结构
+
+```
+internal/
+├── socket/                    # 新增包：Unix socket 通信
+│   ├── service.go            # Socket 服务端（在 TUI 启动时运行）
+│   │   ├── Start(ctx, projectRoot) → listener
+│   │   │   - 创建 .dscli/ 目录（如不存在）
+│   │   │   - 清理旧 socket 文件（如有），防上次崩溃残留
+│   │   │   - 监听 Unix socket
+│   │   │   - 接收连接 → 按行读取两行纯文本（question + file path）→ 发送到 channel
+│   │   │   - 等待 response → 将内容写回连接（纯文本，可能多行）
+│   │   └── Stop() → cleanup
+│   │       - 关闭 listener
+│   │       - 删除 socket 文件
+│   │
+│   └── client.go             # Socket 客户端（作为 EDITOR 子进程）
+│       └── Run(args []string) exitCode
+│           - 解析参数（文件名）
+│           - 验证文件存在
+│           - 读取文件内容
+│           - 连接 socket
+│           - 发送 request（两行纯文本：question + file path）
+│           - 接收 response（纯文本，读至连接关闭）
+│           - 追加 response 到文件
+│           - 退出
+│
+└── tui/
+    ├── model.go              # 增加 socket 相关字段
+    ├── update.go             # 处理 SocketAskUserMsg
+    └── commands.go           # cmdStartSocketService / cmdWaitSocketResponse
+```
+
+### 12.6 TUI Model 新增字段
+
+```go
+type RootModel struct {
+    // ... 现有字段 ...
+
+    // ── Socket Service ────────────────────────────────────────
+    socketService  *socket.Service   // nil 表示未启动
+    socketListener net.Listener      // Unix socket 监听器
+
+    // ── Socket AskUser ────────────────────────────────────────
+    socketAskReq   *socket.AskRequest  // 当前待处理的请求
+    socketAskResp  chan string         // 用于接收用户响应的 channel
+}
+```
+
+### 12.7 Update 路由变化
+
+```go
+// 新增消息类型
+type socketAskUserMsg struct {
+    Request  *socket.AskRequest
+    Respond  chan<- string  // 用于写回响应
+}
+
+// Update 中处理
+func (m *RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg := msg.(type) {
+    case socketAskUserMsg:
+        // 保存 request 和 respond channel
+        m.socketAskReq = msg.Request
+        m.socketAskResp = msg.Respond
+        // 设置 askQuestion 供模态框显示
+        m.askQuestion = msg.Request.Question
+        m.askInput.SetValue("")
+        m.askInput.Focus()
+        m.prevScreen = m.screen  // 保存当前屏幕
+        m.screen = ScreenAskUser
+        return m, nil
+    }
+}
+
+// resumeFromAskUser 中检测 socket 路径
+func (m *RootModel) resumeFromAskUser() (tea.Model, tea.Cmd) {
+    if m.socketAskResp != nil && m.askResponse != nil {
+        // 通过 socket 返回响应
+        m.socketAskResp <- m.askResponse.Value
+        m.socketAskResp = nil
+        m.socketAskReq = nil
+        screen := m.prevScreen
+        m.prevScreen = ScreenMainMenu
+        m.screen = screen
+        return m, nil
+    }
+    // ... 原有逻辑 ...
+}
+```
+
+### 12.8 ChatSession 环境变量
+
+在 `cmdStartChat` 中设置 `EDITOR` 环境变量：
+
+```go
+func cmdStartChat(agent aiagent.AIAgent, history []ChatLine) tea.Cmd {
+    return func() tea.Msg {
+        opts := aiagent.ChatSessionOptions{
+            Model: "deepseek-chat",
+            // 传递 EDITOR 环境变量给 dscli 子进程
+            Env: []string{
+                "EDITOR=dscli-tui client",
+            },
+        }
+        session, err := agent.NewChatSession(context.Background(), opts)
+        // ...
+    }
+}
+```
+
+对应的 `ChatSessionOptions` 和 `NewChatSession` 增加 env 支持：
+
+```go
+type ChatSessionOptions struct {
+    Model      string
+    Role       string
+    HistSize   int
+    DscliPath  string
+    ProjectDir string
+    Env        []string // 额外环境变量，传递给 dscli 子进程
+}
+```
+
+在 `NewChatSession` 中将 `opts.Env` 应用到 `cmd.Env`。
+
+### 12.9 Socket 客户端作为子命令
+
+main.go 中注册：
+
+```go
+func main() {
+    if len(os.Args) >= 2 && os.Args[1] == "client" {
+        // Socket 客户端模式
+        os.Exit(socket.RunClient(os.Args[2:]))
+    }
+    // 正常启动 TUI
+    // ... 启动 Socket Service goroutine ...
+}
+```
+
+`socket.RunClient` 实现要点：
+
+```go
+func RunClient(args []string) int {
+    if len(args) < 1 {
+        fmt.Fprintln(os.Stderr, "usage: dscli-tui client <file>")
+        return 1
+    }
+    filePath := args[0]
+
+    // 1. 验证文件存在
+    content, err := os.ReadFile(filePath)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "error: cannot read %s: %v\n", filePath, err)
+        return 1
+    }
+
+    // 2. 查找 socket 文件
+    socketPath := findSocketPath() // 根据 CWD 查找 .dscli/dscli-tui.sock
+    if socketPath == "" {
+        fmt.Fprintln(os.Stderr, "error: dscli-tui service not running (socket not found)")
+        return 1
+    }
+
+    // 3. 连接 socket
+    conn, err := net.Dial("unix", socketPath)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "error: cannot connect to dscli-tui: %v\n", err)
+        return 1
+    }
+    defer conn.Close()
+
+    // 4. 发送请求（纯文本两行）
+    question := strings.TrimSpace(string(content))
+    fmt.Fprintf(conn, "%s\n%s\n", question, filePath)
+
+    // 5. 接收响应（纯文本，读至连接关闭）
+    respBytes, _ := io.ReadAll(conn)
+    respContent := string(respBytes)
+
+    // 6. 追加响应到文件
+    f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
+    if err != nil {
+        return 1
+    }
+    defer f.Close()
+    f.WriteString("\n" + respContent)
+
+    return 0
+}
+```
+
+### 12.10 查找 Socket 路径
+
+客户端需要从当前工作目录向上查找 `.dscli/dscli-tui.sock`：
+
+```go
+func findSocketPath() string {
+    cwd, _ := os.Getwd()
+    dir := cwd
+    for {
+        socketPath := filepath.Join(dir, ".dscli", "dscli-tui.sock")
+        if _, err := os.Stat(socketPath); err == nil {
+            return socketPath
+        }
+        parent := filepath.Dir(dir)
+        if parent == dir {
+            break
+        }
+        dir = parent
+    }
+    return ""
+}
+```
+
+### 12.11 边界情况
+
+| 场景 | 处理方式 |
+|------|----------|
+| Socket 文件不存在 | 客户端报错退出，dscli 认为编辑器失败，ask_user 返回 error |
+| Socket 文件残留（上次崩溃） | Start 中 `os.Remove(socketPath)` 在 Listen 前清理，确保重启后正常绑定 |
+| Socket 服务未启动 | 客户端连接失败，同上 |
+| 用户按 Esc 取消 | 追加空内容到文件，dscli 读回空字符串 |
+| Socket 超时 | 服务端设置读取超时（如 300s），超时后返回空响应 |
+| 多个 ask_user 同时 | 设计上不支持——串行执行，同一时间只有一个待处理请求 |
+| 客户端崩溃 | dscli 的 cmd.Wait() 检测到非零退出，ask_user 返回 error |
+
+## 13. 实施阶段
+
+### 13.1 Phase 6: AskUser Socket 桥接 ✓
+
+- [x] 新建 `internal/socket/` 包（service.go + client.go）
+- [x] 实现 `socket.Service`：启动 Unix socket 监听（含 stale socket 清理）、请求/响应循环
+- [x] 实现 `socket.Client`：连接 socket、发送/接收、写回文件
+- [x] 实现 `findSocketPath()` 向上查找 socket 文件
+- [x] main.go 增加 `client` 子命令路由
+- [x] `ChatSessionOptions` 增加 `Env []string` 字段
+- [x] `exec.go:NewChatSession` 应用中 `opts.Env` 到 `cmd.Env`
+- [x] `commands.go:cmdStartChat` 设置 `EDITOR=dscli-tui client`
+- [x] Model 增加 socket 相关字段
+- [x] update.go 处理 `SocketAskUserMsg`
+- [x] `resumeFromAskUser` 增加 socket 响应路径
+- [x] TUI 启动时启动 Socket Service goroutine
+- [x] TUI 退出时关闭 Socket Service（删除 socket 文件）
+- [x] Socket 包单元测试（3 个测试：Start/Stop、请求/响应、stale socket 清理）
+- [ ] 手动验证 ask_user 从 dscli chat → socket → TUI 模态框 → 返回的全链路

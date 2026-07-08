@@ -49,7 +49,6 @@ const (
 	ScreenQuitting
 )
 
-
 // ─── MenuItem ───────────────────────────────────────────────────────
 
 // MenuItem describes one entry in the main command palette.
@@ -77,6 +76,7 @@ type HistoryItem struct {
 	ReasoningContent string // reasoning_content from dscli --json
 	Content          string // content from dscli --json
 }
+
 // ─── SkillItem ────────────────────────────────────────────────────
 
 // SkillItem represents one entry in the dscli skill list.
@@ -115,8 +115,6 @@ type ProjectItem struct {
 	CreatedAt  string // creation timestamp
 	IsCurrent  bool   // whether this is the current project
 }
-
-
 
 // RootModel is the top-level Bubble Tea model.
 //
@@ -163,11 +161,11 @@ type RootModel struct {
 	menuCursor int // currently highlighted item index
 
 	// ── Command output (scrollable) ─────────────────────────────────
-	cmdOutput    string   // rendered output text
-	cmdSuccess   bool     // whether the command succeeded
-	outputLines    []string // cmdOutput split by newlines for scrolling
-	outputScroll   int      // current scroll offset (0 = top)
-	outputScrollMax int     // max scroll offset (clamped to total - visible)
+	cmdOutput       string   // rendered output text
+	cmdSuccess      bool     // whether the command succeeded
+	outputLines     []string // cmdOutput split by newlines for scrolling
+	outputScroll    int      // current scroll offset (0 = top)
+	outputScrollMax int      // max scroll offset (clamped to total - visible)
 
 	// ── History list ────────────────────────────────────────────
 	historyItems  []HistoryItem // parsed from "dscli history list"
@@ -183,15 +181,14 @@ type RootModel struct {
 	memoryCursor      int          // currently highlighted item index
 	memorySearchQuery string       // non-empty when showing search results
 
-
 	// ── Tool list ─────────────────────────────────────────────
 	toolItems  []ToolItem // parsed from "dscli tool list"
 	toolCursor int        // currently highlighted item index
 	toolPage   int        // current page (0-based) for paginated display
 
 	// ── Project list ──────────────────────────────────────────
-	projectItems          []ProjectItem // parsed from "dscli project list"
-	projectCursor         int           // currently highlighted item index
+	projectItems           []ProjectItem // parsed from "dscli project list"
+	projectCursor          int           // currently highlighted item index
 	projectRemovePendingID string        // project ID pending deletion confirmation
 
 	chatHistory   []ChatLine           // accumulated conversation
@@ -206,7 +203,7 @@ type RootModel struct {
 	spinner   spinner.Model
 	spinnerOn bool // true when spinner should be rendered
 
-	// ── AskUser modal ─────────────────────────────────────────────
+	// ── AskUser modal (for memory search, project deletion, etc.) ──
 	prevScreen  Screen // screen to restore after answering
 	askQuestion string
 	askSemantic protocol.Semantic
@@ -219,8 +216,15 @@ type RootModel struct {
 	// ── Internal flags ────────────────────────────────────────────
 	chatReady bool   // true after first ready event in current exchange
 	cmdTitle  string // display title for current running command (breadcrumb)
-}
 
+	// ── AskUser integration in Chat ────────────────────────────────
+	// When dscli asks a question (via socket bridge or chat protocol),
+	// the question is appended to chatHistory and askUserPending is set.
+	// The user's next Enter in Chat is routed to askUserRespond instead
+	// of starting a new chat exchange.
+	askUserPending bool                 // true when dscli expects user input
+	askUserRespond func(string) tea.Cmd // call with user's response, returns cmd to continue
+}
 
 // ─── Menu item definitions ───────────────────────────────────────────
 
@@ -250,9 +254,9 @@ func New(agent aiagent.AIAgent) *RootModel {
 	ta.Placeholder = "Type your message... (Ctrl+J ↵)"
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
-	ta.CharLimit = 0       // no limit
-	ta.SetHeight(3)        // fixed 3-line input area
-	ta.MaxHeight = 10      // max 10 lines before internal scroll
+	ta.CharLimit = 0  // no limit
+	ta.SetHeight(3)   // fixed 3-line input area
+	ta.MaxHeight = 10 // max 10 lines before internal scroll
 
 	// Enter → send, Ctrl+J → newline (Shift+Enter works on some terminals)
 	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "ctrl+j")
@@ -277,15 +281,15 @@ func New(agent aiagent.AIAgent) *RootModel {
 	projectRoot := ShortenPath(cwd)
 
 	return &RootModel{
-		screen:       ScreenMainMenu,
-		agent:        agent,
-		projectRoot:  projectRoot,
-		modelName:    "deepseek-chat",
-		menuItems:    defaultMenuItems,
-		menuCursor:   0,
-		chatInput:    ta,
-		askInput:     askInput,
-		spinner:      sp,
+		screen:      ScreenMainMenu,
+		agent:       agent,
+		projectRoot: projectRoot,
+		modelName:   "deepseek-chat",
+		menuItems:   defaultMenuItems,
+		menuCursor:  0,
+		chatInput:   ta,
+		askInput:    askInput,
+		spinner:     sp,
 	}
 }
 
