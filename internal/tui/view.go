@@ -33,13 +33,14 @@ func renderLogo() string {
 	}
 
 	frameStyle := lipgloss.NewStyle().
+		Background(colorBase).
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(colorOverlay).
 		Padding(0, 1).
 		MarginBottom(1)
 
-	accentStyle := lipgloss.NewStyle().Foreground(colorMauve).Bold(true)
-	taglineStyle := lipgloss.NewStyle().Foreground(colorSubtext).Italic(true)
+	accentStyle := lipgloss.NewStyle().Background(colorBase).Foreground(colorMauve).Bold(true)
+	taglineStyle := lipgloss.NewStyle().Background(colorBase).Foreground(colorSubtext).Italic(true)
 
 	var b strings.Builder
 
@@ -52,7 +53,7 @@ func renderLogo() string {
 	// ASCII art with gradient
 	for i, line := range logoLines {
 		b.WriteString(" ")
-		b.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(line))
+		b.WriteString(lipgloss.NewStyle().Background(colorBase).Foreground(colors[i]).Bold(true).Render(line))
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
@@ -947,7 +948,7 @@ func (m *RootModel) viewAskUser() string {
 
 	// ── Title ──
 	title := "🤖 dscli asks:"
-	content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render(title))
+	content.WriteString(lipgloss.NewStyle().Background(colorBase).Bold(true).Foreground(colorPrimary).Render(title))
 	content.WriteString("\n\n")
 
 	// ── Question (word-wrapped) ──
@@ -1014,6 +1015,7 @@ func (m *RootModel) viewAskUser() string {
 
 	// ── Wrap in a lipgloss rounded-border box ──
 	boxStyle := lipgloss.NewStyle().
+		Background(colorBase).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorPrimary).
 		Padding(0, 1)
