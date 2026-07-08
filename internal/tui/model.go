@@ -249,6 +249,12 @@ var defaultMenuItems = []MenuItem{
 
 // New creates a new RootModel with the given agent.
 func New(agent aiagent.AIAgent) *RootModel {
+	// Apply theme from config (overrides default Tokyo Night from init()).
+	cfg := loadConfig()
+	if colors, ok := themeByName[cfg.Theme]; ok && cfg.Theme != "" && cfg.Theme != "tokyo-night" {
+		initStyles(colors)
+	}
+
 	// ── Multi-line chat input (textarea) ──────────────────────────
 	ta := textarea.New()
 	ta.Placeholder = "Type your message... (Ctrl+J ↵)"
@@ -257,7 +263,6 @@ func New(agent aiagent.AIAgent) *RootModel {
 	ta.CharLimit = 0  // no limit
 	ta.SetHeight(3)   // fixed 3-line input area
 	ta.MaxHeight = 10 // max 10 lines before internal scroll
-
 	// Enter → send, Ctrl+J → newline (Shift+Enter works on some terminals)
 	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "ctrl+j")
 
