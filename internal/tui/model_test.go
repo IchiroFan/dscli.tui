@@ -22,6 +22,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/dscli/dscli.tui/internal/aiagent"
+	"github.com/dscli/dscli.tui/internal/socket"
 	"github.com/dscli/dscli.tui/internal/tui/protocol"
 )
 
@@ -129,7 +130,6 @@ func mouseWheelDown() tea.MouseMsg {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
-
 
 // model returns a fresh RootModel with Width/Height set for view tests.
 func model() *RootModel {
@@ -886,7 +886,7 @@ func TestHistoryListPayload(t *testing.T) {
 		m.screen = ScreenRunningCmd
 		p := &protocol.CommandResultPayload{
 			Success: true,
-		Data:    `[{"id":25604,"role":"assistant","ok":false,"created_at":"2026-07-04T14:00:00+08:00"},{"id":25605,"role":"tool","ok":true,"created_at":"2026-07-04T14:00:01+08:00"}]`,
+			Data:    `[{"id":25604,"role":"assistant","ok":false,"created_at":"2026-07-04T14:00:00+08:00"},{"id":25605,"role":"tool","ok":true,"created_at":"2026-07-04T14:00:01+08:00"}]`,
 		}
 		if !m.historyListPayload(p) {
 			t.Fatal("historyListPayload returned false")
@@ -962,8 +962,8 @@ dscli                           built-in   是`,
 			wantCount: 0,
 		},
 		{
-			name: "header only",
-			input: `名称                              范围         自动注入`,
+			name:      "header only",
+			input:     `名称                              范围         自动注入`,
 			wantCount: 0,
 		},
 		{
@@ -1242,10 +1242,10 @@ func TestSkillListNonKeyMsg(t *testing.T) {
 
 func TestParseMemoryList(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
-		wantCount int
-		firstID   string
+		name       string
+		input      string
+		wantCount  int
+		firstID    string
 		firstTitle string
 	}{
 		{
@@ -1263,16 +1263,16 @@ func TestParseMemoryList(t *testing.T) {
 			wantCount: 0,
 		},
 		{
-			name: "header only",
-			input: `ID  TITLE                                                           Created At       Updated At`,
+			name:      "header only",
+			input:     `ID  TITLE                                                           Created At       Updated At`,
 			wantCount: 0,
 		},
 		{
 			name: "single memory",
 			input: `ID  TITLE     Created At       Updated At
 1   My memory  Jul  1 10:00:00  Jul  1 10:00:00`,
-			wantCount: 1,
-			firstID:   "1",
+			wantCount:  1,
+			firstID:    "1",
 			firstTitle: "My memory",
 		},
 	}
@@ -2533,6 +2533,133 @@ func TestResumeFromAskUser(t *testing.T) {
 		if m.screen != ScreenMainMenu {
 			t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
 		}
+		if cmd != nil {
+			t.Error("expected nil cmd for non-chat resume")
+		}
+	})
+}
+
+func TestSocketAskUserMsgHandler(t *testing.T) {
+	m := model()
+	m.screen = ScreenChatting
+
+	// Simulate a socket ask_user request.
+	respCh := make(chan string, 1)
+	req := &socket.AskRequest{
+		Question: "What is your favorite color?",
+		FilePath: "/tmp/test.md",
+		RespCh:   respCh,
+	}
+	msg := SocketAskUserMsg{Request: req}
+
+	updated, cmd := m.Update(msg)
+	m2 := updated.(*RootModel)
+
+	// Verify screen transition.
+	if m2.screen != ScreenAskUser {
+		t.Errorf("screen = %d, want ScreenAskUser", m2.screen)
+	}
+	if m2.prevScreen != ScreenChatting {
+		t.Errorf("prevScreen = %d, want ScreenChatting", m2.prevScreen)
+	}
+
+	// Verify ask state is properly initialized.
+	if m2.askSemantic != protocol.SemanticInput {
+		t.Errorf("askSemantic = %q, want %q", m2.askSemantic, protocol.SemanticInput)
+	}
+	if m2.askQuestion != "What is your favorite color?" {
+		t.Errorf("askQuestion = %q, want %q", m2.askQuestion, "What is your favorite color?")
+	}
+	if m2.askOptions != nil {
+		t.Errorf("askOptions = %v, want nil", m2.askOptions)
+	}
+	if m2.askChoice != 0 {
+		t.Errorf("askChoice = %d, want 0", m2.askChoice)
+	}
+	if m2.askDone {
+		t.Error("askDone should be false")
+	}
+	if m2.askResponse != nil {
+		t.Error("askResponse should be nil")
+	}
+	if m2.socketAskReq != req {
+		t.Error("socketAskReq should be set to the request")
+	}
+	if cmd != nil {
+		t.Error("expected nil cmd from SocketAskUserMsg")
+	}
+}
+
+func TestResumeFromAskUserSocketFlow(t *testing.T) {
+	t.Run("sends response via RespCh and resumes chat", func(t *testing.T) {
+		m := model()
+		m.prevScreen = ScreenChatting
+		m.chatSession = mockSession()
+		respCh := make(chan string, 1)
+		m.socketAskReq = &socket.AskRequest{
+			Question: "test?",
+			FilePath: "/tmp/test.md",
+			RespCh:   respCh,
+		}
+		m.askResponse = &protocol.AskUserResponsePayload{Value: "my answer"}
+
+		_, cmd := m.resumeFromAskUser()
+
+		// Verify response was sent via RespCh.
+		select {
+		case ans := <-respCh:
+			if ans != "my answer" {
+				t.Errorf("response = %q, want %q", ans, "my answer")
+			}
+		default:
+			t.Error("expected response on RespCh")
+		}
+
+		// Verify screen restored to Chatting.
+		if m.screen != ScreenChatting {
+			t.Errorf("screen = %d, want ScreenChatting", m.screen)
+		}
+
+		// Verify socketAskReq is cleaned up.
+		if m.socketAskReq != nil {
+			t.Error("socketAskReq should be nil after resume")
+		}
+
+		// Verify cmd is non-nil (resumes waiting for chat events).
+		if cmd == nil {
+			t.Error("expected non-nil cmd to resume chat events")
+		}
+	})
+
+	t.Run("from non-chat returns to prev screen without cmd", func(t *testing.T) {
+		m := model()
+		m.prevScreen = ScreenMainMenu
+		respCh := make(chan string, 1)
+		m.socketAskReq = &socket.AskRequest{
+			Question: "test?",
+			FilePath: "/tmp/test.md",
+			RespCh:   respCh,
+		}
+		m.askResponse = &protocol.AskUserResponsePayload{Value: "ok"}
+
+		_, cmd := m.resumeFromAskUser()
+
+		// Verify response was still sent.
+		select {
+		case ans := <-respCh:
+			if ans != "ok" {
+				t.Errorf("response = %q, want %q", ans, "ok")
+			}
+		default:
+			t.Error("expected response on RespCh")
+		}
+
+		// Verify screen restored to prev (main menu).
+		if m.screen != ScreenMainMenu {
+			t.Errorf("screen = %d, want ScreenMainMenu", m.screen)
+		}
+
+		// No chat session, so cmd should be nil.
 		if cmd != nil {
 			t.Error("expected nil cmd for non-chat resume")
 		}

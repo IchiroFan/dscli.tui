@@ -228,6 +228,9 @@ func (a *execAgent) NewChatSession(ctx context.Context, opts ChatSessionOptions)
 	if opts.ProjectDir != "" {
 		cmd.Dir = opts.ProjectDir
 	}
+	if len(opts.Env) > 0 {
+		cmd.Env = append(os.Environ(), opts.Env...)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

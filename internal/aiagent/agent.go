@@ -94,11 +94,12 @@ type AIAgent interface {
 
 // ChatSessionOptions configures a chat session.
 type ChatSessionOptions struct {
-	Model      string // model name (default: deepseek-chat)
-	Role       string // system role prompt (dev/expert/review/test)
-	HistSize   int    // number of history messages to include context
-	DscliPath  string // path to dscli executable (empty = use resolved path)
-	ProjectDir string // working directory for the dscli process
+	Model      string   // model name (default: deepseek-chat)
+	Role       string   // system role prompt (dev/expert/review/test)
+	HistSize   int      // number of history messages to include context
+	DscliPath  string   // path to dscli executable (empty = use resolved path)
+	ProjectDir string   // working directory for the dscli process
+	Env        []string // additional environment variables for the dscli process
 }
 
 // ─── ChatSession ────────────────────────────────────────────

@@ -79,6 +79,7 @@ func cmdStartChat(agent aiagent.AIAgent, history []ChatLine) tea.Cmd {
 	return func() tea.Msg {
 		opts := aiagent.ChatSessionOptions{
 			Model: "deepseek-chat",
+			Env:   []string{"EDITOR=dscli-tui client"},
 		}
 		session, err := agent.NewChatSession(context.Background(), opts)
 		if err != nil {
