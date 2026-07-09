@@ -219,3 +219,102 @@ func init() {
 	// Ensure consistent initial state for all tests.
 	lipgloss.SetColorProfile(termenv.TrueColor)
 }
+
+func TestDefaultFontConfig(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.Font.Bold {
+		t.Error("default Font.Bold should be false")
+	}
+	if cfg.Font.Italic {
+		t.Error("default Font.Italic should be false")
+	}
+}
+
+func TestLoadConfigFontBold(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	cfgDir := filepath.Join(tmpDir, ".dscli-tui")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("font:\n  bold: true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadConfig()
+	if !cfg.Font.Bold {
+		t.Error("expected Font.Bold to be true from config")
+	}
+	if cfg.Font.Italic {
+		t.Error("expected Font.Italic to remain false")
+	}
+}
+
+func TestLoadConfigFontItalic(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	cfgDir := filepath.Join(tmpDir, ".dscli-tui")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("font:\n  italic: true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadConfig()
+	if !cfg.Font.Italic {
+		t.Error("expected Font.Italic to be true from config")
+	}
+	if cfg.Font.Bold {
+		t.Error("expected Font.Bold to remain false")
+	}
+}
+
+func TestLoadConfigFontBoth(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	cfgDir := filepath.Join(tmpDir, ".dscli-tui")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	yamlContent := []byte("theme: nord\nfont:\n  bold: true\n  italic: true\n")
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), yamlContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadConfig()
+	if cfg.Theme != "nord" {
+		t.Errorf("theme = %q, want %q", cfg.Theme, "nord")
+	}
+	if !cfg.Font.Bold {
+		t.Error("expected Font.Bold to be true")
+	}
+	if !cfg.Font.Italic {
+		t.Error("expected Font.Italic to be true")
+	}
+}
+
+func TestLoadConfigFontOnlyNoTheme(t *testing.T) {
+	// Font config with theme omitted should use default theme.
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	cfgDir := filepath.Join(tmpDir, ".dscli-tui")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("font:\n  bold: true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadConfig()
+	if cfg.Theme != "tokyo-night" {
+		t.Errorf("expected default theme, got %q", cfg.Theme)
+	}
+	if !cfg.Font.Bold {
+		t.Error("expected Font.Bold to be true")
+	}
+}

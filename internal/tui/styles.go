@@ -378,18 +378,21 @@ func initStyles(c Colors) {
 
 	UserBubbleBase = lipgloss.NewStyle().
 		Background(colorSurface).
+		Foreground(colorText).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorGreen).
 		Padding(0, 1)
 
 	AssistantBubbleBase = lipgloss.NewStyle().
 		Background(colorSurface).
+		Foreground(colorText).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorPrimary).
 		Padding(0, 1)
 
 	ThinkBubbleBase = lipgloss.NewStyle().
 		Background(colorSurface).
+		Foreground(colorSubtext).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(colorMauve).
 		Padding(0, 1)
@@ -481,6 +484,71 @@ func initStyles(c Colors) {
 func init() {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	initStyles(ThemeTokyoNight)
+}
+
+// allStyles is a list of pointers to every package-level style variable.
+// Used by applyFont to apply global font overrides (bold, italic) to all styles
+// uniformly after initStyles has been called.
+var allStyles = []*lipgloss.Style{
+	&AppStyle,
+	&HeaderStyle,
+	&HelpStyle,
+	&ErrorStyle,
+	&MenuItemStyle,
+	&MenuSelectedStyle,
+	&MenuDescStyle,
+	&TitleStyle,
+	&LogoStyle,
+	&ListItemStyle,
+	&ListSelectedStyle,
+	&TimestampStyle,
+	&ContentPreviewStyle,
+	&NoDataStyle,
+	&PageInfoStyle,
+	&SectionHeadingStyle,
+	&DetailLabelStyle,
+	&DetailValueStyle,
+	&DetailContentStyle,
+	&ChatLoadingStyle,
+	&ChatRoleUserStyle,
+	&ChatRoleAssistantStyle,
+	&SpinnerStyle,
+	&SpinnerDoneStyle,
+	&UserBubbleBase,
+	&AssistantBubbleBase,
+	&ThinkBubbleBase,
+	&ThinkLineStyle,
+	&ToolLineStyle,
+	&TruncationWarnBubble,
+	&AssistantBodyStyle,
+	&ThinkBodyStyle,
+	&ToolBodyStyle,
+	&StateBodyStyle,
+	&TruncationBodyStyle,
+	&BadgeSuccessStyle,
+	&BadgeWarnStyle,
+	&StatusBarBg,
+	&StatusVersion,
+	&StatusLabel,
+	&StatusSep,
+	&StatusScreen,
+}
+
+// applyFont applies global font overrides (bold, italic) to all style variables.
+// Called after initStyles() when the user's config specifies font preferences.
+// When a font attribute is set to true, it is added to every style that currently
+// exists — styles that already have bold/italic remain unchanged (bold+bold=bold).
+func applyFont(f FontConfig) {
+	if f.Bold {
+		for _, s := range allStyles {
+			*s = s.Bold(true)
+		}
+	}
+	if f.Italic {
+		for _, s := range allStyles {
+			*s = s.Italic(true)
+		}
+	}
 }
 
 // BubbleMaxPercent is the maximum bubble width as a percentage of available

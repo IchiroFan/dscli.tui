@@ -265,6 +265,30 @@ theme: tokyo-night
 
 Change the theme at any time by editing this file and restarting dscli-tui.
 
+### Font
+
+The `font` key controls global text appearance. By default, bold and italic are used only on specific semantic elements (headers, timestamps, selected items, etc.). Setting a font attribute to `true` applies it to **all** text uniformly.
+
+| Key     | Type    | Default | Description                          |
+|---------|---------|---------|--------------------------------------|
+| `bold`  | boolean | `false` | Make all text bold                   |
+| `italic`| boolean | `false` | Make all text italic                 |
+
+Elements that already use the attribute (e.g. bold on headers, italic on timestamps) are unaffected — bold+bold stays bold.
+
+#### Example config file
+
+```yaml
+# ~/.dscli-tui/config.yaml
+
+# Pick a theme: tokyo-night, dracula, monokai, nord, solarized-light
+theme: tokyo-night
+
+# Font style — optional, omit for default behaviour
+font:
+  bold: false    # set true for global bold
+  italic: false  # set true for global italic
+```
 ---
 
 ## ⌨️ Keyboard Reference
@@ -371,7 +395,7 @@ Current coverage: `internal/tui/` package — 5 test files, all passing.
 
 - **Theme system** — 5 built-in color palettes. All styles are derived from a single `Colors` struct and recomputed on theme change.
 - **Theme names**: `tokyo-night` (default, dark), `dracula` (dark), `monokai` (dark), `nord` (dark), `solarized-light` (light)
-- **Font**: Terminal default (no special glyph requirements)
+- **Font** — Terminal default (no special glyph requirements). Global bold/italic configurable via `font.bold` / `font.italic` in config.yaml, applied uniformly to all styles via `applyFont()`.
 - **Frameworks**: [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lip Gloss](https://github.com/charmbracelet/lipgloss) + [Bubbles](https://github.com/charmbracelet/bubbles)
 
 ---

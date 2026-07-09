@@ -10,9 +10,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// FontConfig holds user font styling preferences.
+// Applied globally to all text-based style variables.
+type FontConfig struct {
+	Bold   bool `yaml:"bold"`
+	Italic bool `yaml:"italic"`
+}
+
 // Config represents ~/.dscli-tui/config.yaml.
 type Config struct {
-	Theme string `yaml:"theme"` // theme name: tokyo-night, dracula, monokai, nord, solarized-light
+	Theme string     `yaml:"theme"` // theme name: tokyo-night, dracula, monokai, nord, solarized-light
+	Font  FontConfig `yaml:"font"`
 }
 
 // defaultConfig returns the default configuration.
@@ -55,5 +63,6 @@ func loadConfig() Config {
 	if fileCfg.Theme != "" {
 		cfg.Theme = fileCfg.Theme
 	}
+	cfg.Font = fileCfg.Font
 	return cfg
 }

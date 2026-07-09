@@ -256,6 +256,9 @@ func New(agent aiagent.AIAgent) *RootModel {
 	if colors, ok := themeByName[themeName]; ok && themeName != "tokyo-night" {
 		initStyles(colors)
 	}
+	// Apply font overrides from config (bold, italic).
+	applyFont(cfg.Font)
+
 	// ── Multi-line chat input (textarea) ──────────────────────────
 	ta := textarea.New()
 	ta.Placeholder = "Type your message... (Ctrl+J ↵)"
