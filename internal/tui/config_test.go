@@ -84,24 +84,6 @@ func TestLoadConfigUnknownTheme(t *testing.T) {
 	}
 }
 
-func TestLoadConfigSystemTheme(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-
-	cfgDir := filepath.Join(tmpDir, ".dscli-tui")
-	if err := os.MkdirAll(cfgDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("theme: system\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := loadConfig()
-	if cfg.Theme != "system" {
-		t.Errorf("theme = %q, want %q", cfg.Theme, "system")
-	}
-}
-
 func TestThemeByName(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -114,7 +96,6 @@ func TestThemeByName(t *testing.T) {
 		{"solarized-light", true},
 		{"nonexistent", false},
 		{"", false},
-		{"system", false}, // "system" is not a theme palette, it's a resolver directive
 	}
 
 	for _, tt := range tests {
@@ -124,60 +105,6 @@ func TestThemeByName(t *testing.T) {
 				t.Errorf("themeByName[%q] exists = %v, want %v", tt.name, ok, tt.exists)
 			}
 		})
-	}
-}
-
-func TestResolveThemePassthrough(t *testing.T) {
-	// Non-system themes should pass through unchanged.
-	for _, name := range []string{"tokyo-night", "dracula", "monokai", "nord", "solarized-light", "nonexistent"} {
-		cfg := Config{Theme: name}
-		got := cfg.ResolveTheme()
-		if got != name {
-			t.Errorf("ResolveTheme() with %q = %q, want %q", name, got, name)
-		}
-	}
-}
-
-func TestResolveThemeSystem(t *testing.T) {
-	// "system" should resolve to a valid built-in theme name.
-	cfg := Config{Theme: "system"}
-	got := cfg.ResolveTheme()
-	if got != "tokyo-night" && got != "solarized-light" {
-		t.Errorf("ResolveTheme() with \"system\" = %q, want either \"tokyo-night\" or \"solarized-light\"", got)
-	}
-	// Must be a valid theme.
-	if _, ok := themeByName[got]; !ok {
-		t.Errorf("ResolveTheme() resolved to %q which is not in themeByName", got)
-	}
-}
-
-func TestDetectSystemThemeReturnsValid(t *testing.T) {
-	// detectSystemTheme should always return a valid theme name.
-	result := detectSystemTheme()
-	if result != "tokyo-night" && result != "solarized-light" {
-		t.Errorf("detectSystemTheme() = %q, want \"tokyo-night\" or \"solarized-light\"", result)
-	}
-	// Verify it's a known theme.
-	if _, ok := themeByName[result]; !ok {
-		t.Errorf("detectSystemTheme() returned %q which is not in themeByName", result)
-	}
-}
-
-func TestDetectSystemThemeDarkFallback(t *testing.T) {
-	// In an isolated environment (no desktop), detectSystemTheme should
-	// fall back to "tokyo-night". We verify by temporarily clearing PATH
-	// so gsettings/defaults commands won't be found.
-	tmpDir := t.TempDir()
-	// Create empty bin dirs to ensure commands aren't found.
-	emptyPath := filepath.Join(tmpDir, "empty-bin")
-	if err := os.MkdirAll(emptyPath, 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", emptyPath)
-
-	result := detectSystemTheme()
-	if result != "tokyo-night" {
-		t.Errorf("detectSystemTheme() without desktop tools = %q, want \"tokyo-night\"", result)
 	}
 }
 
