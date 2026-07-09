@@ -244,30 +244,25 @@ func initStyles(c Colors) {
 		MarginBottom(1)
 
 	HelpStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext).
 		MarginTop(1)
 
 	ErrorStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorRed).
 		Bold(true).
 		Padding(0, 1)
 	// ── Dashboard / Menu Styles ──────────────────────────────────────
 
 	MenuItemStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorText).
 		PaddingLeft(2)
 
 	MenuSelectedStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorPrimary).
 		Bold(true).
 		PaddingLeft(1)
 
 	MenuDescStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext)
 
 	TitleStyle = lipgloss.NewStyle().
@@ -288,35 +283,29 @@ func initStyles(c Colors) {
 	// ── List Styles ──────────────────────────────────────────────────
 
 	ListItemStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorText).
 		PaddingLeft(2)
 
 	ListSelectedStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorPrimary).
 		Bold(true).
 		PaddingLeft(1)
 
 	TimestampStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext).
 		Italic(true)
 
 	ContentPreviewStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext).
 		PaddingLeft(4)
 
 	NoDataStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext).
 		Italic(true).
 		PaddingLeft(2).
 		MarginTop(1)
 
 	PageInfoStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorMauve).
 		Bold(true).
 		PaddingLeft(2)
@@ -331,46 +320,38 @@ func initStyles(c Colors) {
 		MarginBottom(1)
 
 	DetailLabelStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext).
 		Width(14).
 		Align(lipgloss.Right).
 		PaddingRight(1)
 
 	DetailValueStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorText)
 
 	DetailContentStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorText).
 		PaddingLeft(2)
 
 	// ── Chat (non-bubble) Styles ─────────────────────────────────────
 
 	ChatLoadingStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext).
 		Italic(true).
 		PaddingLeft(2)
 
 	ChatRoleUserStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorGreen).
 		Bold(true)
 
 	ChatRoleAssistantStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorPrimary).
 		Bold(true)
 
 	SpinnerStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorPrimary).
 		Bold(true)
 
 	SpinnerDoneStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorGreen).
 		Bold(true)
 
@@ -395,56 +376,46 @@ func initStyles(c Colors) {
 		Padding(0, 1)
 
 	ThinkLineStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext).
 		Italic(true)
 
 	ToolLineStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorYellow).
 		Italic(true)
 
 	TruncationWarnBubble = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorRed).
 		Bold(true)
 
 	// ── Unified bubble inner styles ──────────────────────────────────
 
 	AssistantBodyStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorText).
 		Bold(true)
 
 	ThinkBodyStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext).
 		Italic(true)
 
 	ToolBodyStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorYellow).
 		Italic(true)
 
 	StateBodyStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorSubtext).
 		Italic(true)
 
 	TruncationBodyStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorRed).
 		Bold(true)
 
 	// ── Status Badge Styles ──────────────────────────────────────────
 
 	BadgeSuccessStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorGreen).
 		Bold(true)
 
 	BadgeWarnStyle = lipgloss.NewStyle().
-		Background(colorBase).
 		Foreground(colorYellow).
 		Bold(true)
 
@@ -643,7 +614,6 @@ func ChatInputBaseStyle(focused bool) lipgloss.Style {
 		borderColor = colorOverlay
 	}
 	return lipgloss.NewStyle().
-		Background(colorBase).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
 		Foreground(colorText).

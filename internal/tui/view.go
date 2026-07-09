@@ -181,7 +181,6 @@ func (m *RootModel) layout(rendered string, input ...string) string {
 	return m.ensureBg(b.String())
 }
 
-
 // ensureBg post-processes a rendered string so every line has the base
 // background colour filled to the terminal width.  It fixes the problem
 // where lipgloss's \x1b[0m reset code clears the background, causing empty
@@ -231,7 +230,6 @@ func (m *RootModel) ensureBg(s string) string {
 
 	return strings.Join(lines, "\n")
 }
-
 
 // View implements tea.Model.View.
 func (m *RootModel) View() string {
@@ -883,7 +881,6 @@ func (m *RootModel) viewProjectList() string {
 
 	return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 }
-
 
 // ─── Chatting
 
