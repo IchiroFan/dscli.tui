@@ -45,9 +45,8 @@ func renderLogo() string {
 	var b strings.Builder
 
 	// Header line
-	b.WriteString(accentStyle.Render(" 🐋 DSCLI TUI "))
-	b.WriteString(strings.Repeat(" ", 16))
-	b.WriteString(accentStyle.Render(" ONLINE "))
+	b.WriteString(accentStyle.Render(" 🐋 DSCLI TUI " + strings.Repeat(" ", 16) + " ONLINE "))
+
 	b.WriteString("\n\n")
 
 	// ASCII art with gradient
@@ -79,7 +78,7 @@ func (m *RootModel) renderStatusBar() string {
 	// Project + model labels.
 	projectLabel := StatusLabel.Render(" 📁 " + m.projectRoot + " ")
 	modelLabel := StatusLabel.Render(" 🤖 " + m.modelName + " ")
-	sep := StatusSep.Render("│")
+	sep := StatusSep.Render(" │ ")
 
 	// Screen name badge (right side).
 	var screenName string
@@ -111,7 +110,9 @@ func (m *RootModel) renderStatusBar() string {
 	screenBadge := StatusScreen.Render(" " + screenName + " ")
 
 	// Assemble left section: badge │ project │ model
-	left := badge + " " + sep + " " + projectLabel + " " + sep + " " + modelLabel
+	// Each segment includes its own spacing within the styled rendering,
+	// so there are no plain spaces between segments that could lack background.
+	left := badge + sep + projectLabel + sep + modelLabel
 	right := screenBadge
 
 	leftW := lipgloss.Width(left)
@@ -120,28 +121,117 @@ func (m *RootModel) renderStatusBar() string {
 	if fillerW < 0 {
 		fillerW = 0
 	}
-	filler := strings.Repeat(" ", fillerW)
+	// Render filler with background so spaces between left and right segments
+	// don't show the terminal's default background.
+	fillerStyle := lipgloss.NewStyle().Background(colorBase)
+	filler := fillerStyle.Render(strings.Repeat(" ", fillerW))
 
 	barText := left + filler + right
 	return StatusBarBg.Width(m.Width).Render(barText)
 }
 
-// wrapWithFill pads the rendered content with background-filled empty lines
-// so that the content lines + status bar fill exactly the terminal height.
+// layout pads the rendered content with background-filled empty lines
+// so that the content lines + optional input area + status bar fill exactly
+// the terminal height. The status bar is always pinned to the bottom.
+// If input is provided, it is placed just above the status bar.
 // The rendered string should already have Background(colorBase) applied.
-func (m *RootModel) wrapWithFill(rendered string) string {
-	L := strings.Count(rendered, "\n") + 1
-	fillNeeded := m.Height - 1 - L
-	if fillNeeded > 0 {
-		fillerStyle := lipgloss.NewStyle().Background(colorBase).Width(m.Width)
-		for i := 0; i < fillNeeded; i++ {
-			rendered += "\n" + fillerStyle.Render(" ")
+func (m *RootModel) layout(rendered string, input ...string) string {
+	contentLines := 0
+	if rendered != "" {
+		contentLines = strings.Count(rendered, "\n") + 1
+	}
+
+	inputStr := ""
+	inputLines := 0
+	if len(input) > 0 {
+		inputStr = input[0]
+		if inputStr != "" {
+			inputLines = strings.Count(inputStr, "\n") + 1
 		}
 	}
-	return rendered + "\n" + m.renderStatusBar()
+
+	// Fill lines needed: total height - content - input - status(1)
+	fillNeeded := m.Height - 1 - inputLines - contentLines
+	if fillNeeded < 0 {
+		fillNeeded = 0
+	}
+
+	var b strings.Builder
+	b.WriteString(rendered)
+	b.WriteString("\n")
+
+	fillerStyle := lipgloss.NewStyle().Background(colorBase).Width(m.Width)
+	for i := 0; i < fillNeeded; i++ {
+		b.WriteString(fillerStyle.Render(" ") + "\n")
+	}
+
+	if inputStr != "" {
+		b.WriteString(inputStr)
+		if !strings.HasSuffix(inputStr, "\n") {
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString(m.renderStatusBar())
+
+	// Ensure every line has the base background color filled to terminal width.
+	// Lipgloss's .Render() emits \x1b[0m which resets background, causing empty
+	// areas to show the terminal's default background.  This post-processing
+	// step re-applies colorBase after every reset and pads each line to width.
+	return m.ensureBg(b.String())
 }
 
-// ─── View ────────────────────────────────────────────────────────────
+
+// ensureBg post-processes a rendered string so every line has the base
+// background colour filled to the terminal width.  It fixes the problem
+// where lipgloss's \x1b[0m reset code clears the background, causing empty
+// areas on each line to show the terminal's default background.
+func (m *RootModel) ensureBg(s string) string {
+	if s == "" || m.Width <= 0 {
+		return s
+	}
+
+	lines := strings.Split(s, "\n")
+	bgSeq := ansiBg(colorBase)
+	resetSeq := "\x1b[0m"
+
+	for i, line := range lines {
+		if line == "" {
+			// Empty lines need no styling — just spaces with background.
+			lines[i] = bgSeq + strings.Repeat(" ", m.Width) + resetSeq
+			continue
+		}
+
+		// 1. Re-apply base background after every ANSI reset.
+		//    This ensures that any character following a reset — including
+		//    padding spaces — inherits the correct background.
+		if strings.Contains(line, resetSeq) {
+			line = strings.ReplaceAll(line, resetSeq, resetSeq+bgSeq)
+		}
+
+		// 2. Ensure the line starts with the background set (in case the
+		//    content doesn't start with a styled segment).
+		if !strings.HasPrefix(line, bgSeq) {
+			line = bgSeq + line
+		}
+
+		// 3. Pad to full terminal width so there is no "right side" gap
+		//    showing the terminal's default background.
+		if visW := lipgloss.Width(line); visW < m.Width {
+			line += strings.Repeat(" ", m.Width-visW)
+		}
+
+		// 4. End with a reset so the next line starts clean.
+		if !strings.HasSuffix(line, resetSeq) {
+			line += resetSeq
+		}
+
+		lines[i] = line
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 
 // View implements tea.Model.View.
 func (m *RootModel) View() string {
@@ -174,7 +264,6 @@ func (m *RootModel) View() string {
 	}
 }
 
-// ─── Main Menu ───────────────────────────────────────────────────────
 func (m *RootModel) viewMainMenu() string {
 	var b strings.Builder
 	b.WriteString(renderLogo())
@@ -186,15 +275,19 @@ func (m *RootModel) viewMainMenu() string {
 			titleStyle = MenuSelectedStyle
 		}
 		b.WriteString(titleStyle.Render(item.Title))
-		b.WriteString("  ")
-		b.WriteString(MenuDescStyle.Render("— " + item.Desc))
+		b.WriteString(MenuDescStyle.Render("  — " + item.Desc))
+
 		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
 	b.WriteString(HelpStyle.Render("↑↓ navigate • enter select • q quit • ctrl+c exit"))
 
-	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+	// Render without AppStyle wrapper — all inner styles already have
+	// Background(colorBase), and the logo frame's own border provides
+	// visual structure. Skipping AppStyle.Padding(1,2) avoids a blank
+	// line above the frame, which made the top border appear "missing".
+	return m.layout(b.String())
 }
 
 // ─── Running Command ─────────────────────────────────────────────────
@@ -205,7 +298,7 @@ func (m *RootModel) viewRunningCmd() string {
 	b.WriteString("\n")
 	b.WriteString(AppStyle.Width(m.Width).Render(
 		fmt.Sprintf("%s Running command...\n", m.spinner.View())))
-	return m.wrapWithFill(b.String())
+	return m.layout(b.String())
 }
 
 // ─── Show Output ─────────────────────────────────────────────────────
@@ -274,7 +367,7 @@ func (m *RootModel) viewShowOutput() string {
 	b.WriteString(HelpStyle.Render("↑↓ scroll · PgUp/PgDn page · g/G top/bottom · Esc/q back to menu"))
 	b.WriteString("\n")
 
-	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+	return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // breadcrumb returns the navigation breadcrumb path.
@@ -340,7 +433,7 @@ func (m *RootModel) viewHistoryList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+		return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Pagination: fixed 20 per page, capped by terminal height.
@@ -435,7 +528,7 @@ func (m *RootModel) viewHistoryList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · PgUp/PgDn page · g/G top/bottom · Enter show · Esc/q back"))
 	b.WriteString("\n")
 
-	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+	return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── Skill List ─────────────────────────────────────────────────
@@ -452,7 +545,7 @@ func (m *RootModel) viewSkillList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+		return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Calculate how many items fit.
@@ -512,7 +605,7 @@ func (m *RootModel) viewSkillList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · Esc/q back to menu"))
 	b.WriteString("\n")
 
-	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+	return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── Memory List ─────────────────────────────────────────────────
@@ -539,7 +632,7 @@ func (m *RootModel) viewMemoryList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+		return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Calculate how many items fit.
@@ -608,7 +701,7 @@ func (m *RootModel) viewMemoryList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · Enter show · / search · Esc/q back to menu"))
 	b.WriteString("\n")
 
-	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+	return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── Tool List ─────────────────────────────────────────────────
@@ -625,7 +718,7 @@ func (m *RootModel) viewToolList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+		return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Pagination: fixed 10 per page, capped by terminal height.
@@ -701,7 +794,7 @@ func (m *RootModel) viewToolList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · PgUp/PgDn page · g/G top/bottom · Esc/q back"))
 	b.WriteString("\n")
 
-	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+	return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 // ─── Project List ─────────────────────────────────────────────
@@ -718,7 +811,7 @@ func (m *RootModel) viewProjectList() string {
 		b.WriteString("\n\n")
 		b.WriteString(HelpStyle.Render("Esc/q — back to menu"))
 		b.WriteString("\n")
-		return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+		return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 	}
 
 	// Calculate how many items fit.
@@ -788,18 +881,18 @@ func (m *RootModel) viewProjectList() string {
 	b.WriteString(HelpStyle.Render("↑↓ navigate · g/G top/bottom · Enter details · d delete · Esc/q back"))
 	b.WriteString("\n")
 
-	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+	return m.layout(AppStyle.Width(m.Width).Render(b.String()))
 }
 
 
 // ─── Chatting
 
 func (m *RootModel) viewChatting() string {
-	var b strings.Builder
+	var content strings.Builder
 
 	// ── Header ──
-	b.WriteString(HeaderStyle.Render("💬 Chat"))
-	b.WriteString("\n")
+	content.WriteString(HeaderStyle.Render("💬 Chat"))
+	content.WriteString("\n")
 
 	// ── Dimensions ──
 	contentW := m.Width - 4 // AppStyle padding (2 left + 2 right)
@@ -819,9 +912,10 @@ func (m *RootModel) viewChatting() string {
 
 	// ── History area ──
 	// Calculate how many visual lines fit:
-	//   header(1) + spacer(1) + history(N) + loading(1) + input(3) + footer(1) + status(1) = header+spacer+input+footer+status
-	// Reserve: header(2) + input(3) + footer(1) + loading(1) + margin = ~8
-	maxLines := m.Height - 8
+	//   header(3) + history(N) + status(3) + AppStyle pad(2) = N+8 inside content block
+	//   input(8) + status bar(1) = 9 outside content block
+	//   total: N + 17 = Height  →  maxLines = Height - 17
+	maxLines := m.Height - 17
 	if maxLines < 5 {
 		maxLines = 5
 	}
@@ -901,58 +995,65 @@ func (m *RootModel) viewChatting() string {
 		}
 		// Scroll indicator at top.
 		if m.chatScroll > 0 {
-			b.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more lines above", m.chatScroll)))
-			b.WriteString("\n")
+			content.WriteString(HelpStyle.Render(fmt.Sprintf("↑ %d more lines above", m.chatScroll)))
+			content.WriteString("\n")
 		}
 
 		for _, l := range allLines[start:end] {
-			b.WriteString(l)
-			b.WriteString("\n")
+			content.WriteString(l)
+			content.WriteString("\n")
 		}
 
 		// Scroll indicator at bottom (when scrolled up from bottom).
 		remaining := totalLines - end
 		if remaining > 0 {
-			b.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more lines below", remaining)))
-			b.WriteString("\n")
+			content.WriteString(HelpStyle.Render(fmt.Sprintf("↓ %d more lines below", remaining)))
+			content.WriteString("\n")
 		}
 	} else {
 		m.chatScrollMax = 0
 		m.chatScroll = 0
 		for _, l := range allLines {
-			b.WriteString(l)
-			b.WriteString("\n")
+			content.WriteString(l)
+			content.WriteString("\n")
 		}
 	}
 
 	// ── Status / Spinner ──
 	if m.askUserPending {
-		b.WriteString("\n")
-		b.WriteString(ChatLoadingStyle.Render("❓ dscli is waiting for your response..."))
-		b.WriteString("\n")
+		content.WriteString("\n")
+		content.WriteString(ChatLoadingStyle.Render("❓ dscli is waiting for your response..."))
+		content.WriteString("\n")
 	} else if m.chatLoading {
-		b.WriteString("\n")
-		b.WriteString(ChatLoadingStyle.Render(fmt.Sprintf("%s AI is thinking...  [Ctrl+S stop]", m.spinner.View())))
-		b.WriteString("\n")
+		content.WriteString("\n")
+		content.WriteString(ChatLoadingStyle.Render(fmt.Sprintf("%s AI is thinking...  [Ctrl+S stop]", m.spinner.View())))
+		content.WriteString("\n")
 	} else if m.chatDone {
-		b.WriteString("\n")
-		b.WriteString(SpinnerDoneStyle.Render("💬 Ready"))
-		b.WriteString("\n")
+		content.WriteString("\n")
+		content.WriteString(SpinnerDoneStyle.Render("💬 Ready"))
+		content.WriteString("\n")
 	}
 
-	// ── Input area (multi-line textarea with blue border) ──
-	b.WriteString("\n")
-	b.WriteString(m.chatInput.View())
-	b.WriteString("\n")
-
+	// ── Input area (pinned above status bar) ──
+	var inputArea strings.Builder
+	inputArea.WriteString(m.chatInput.View())
+	inputArea.WriteString("\n")
 	if m.chatLoading {
-		b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • Ctrl+S: stop • PgUp/PgDn: scroll"))
+		inputArea.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • Ctrl+S: stop • PgUp/PgDn: scroll"))
 	} else {
-		b.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • PgUp/PgDn/Ctrl↑↓: scroll"))
+		inputArea.WriteString(HelpStyle.Render("Esc: menu • Enter: send • Ctrl+J: newline • PgUp/PgDn/Ctrl↑↓: scroll"))
 	}
-	b.WriteString("\n")
 
-	return m.wrapWithFill(AppStyle.Width(m.Width).Render(b.String()))
+	inputRendered := lipgloss.NewStyle().
+		Background(colorBase).
+		Padding(0, 2).
+		Width(m.Width).
+		Render(inputArea.String())
+
+	return m.layout(
+		AppStyle.Width(m.Width).Render(content.String()),
+		inputRendered,
+	)
 }
 
 // ─── AskUser Modal ───────────────────────────────────────────────────
@@ -1036,7 +1137,7 @@ func (m *RootModel) viewAskUser() string {
 
 	boxContent := boxStyle.Render(content.String())
 	wrapped := lipgloss.NewStyle().Background(colorBase).Width(m.Width).Render(boxContent)
-	return m.wrapWithFill(wrapped)
+	return m.layout(wrapped)
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────

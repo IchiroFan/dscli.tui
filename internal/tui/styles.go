@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // ─── Theme Colors ─────────────────────────────────────────────────────────
@@ -470,9 +471,12 @@ func initStyles(c Colors) {
 		Bold(true).
 		Padding(0, 1)
 	}
-
 // init applies the default Tokyo Night theme so all package-level style
+// variables are initialized early. It also forces termenv.TrueColor to ensure
+// lipgloss always emits ANSI escape codes (background fills, foreground text,
+// etc.) regardless of terminal auto-detection.
 func init() {
+	lipgloss.SetColorProfile(termenv.TrueColor)
 	initStyles(ThemeTokyoNight)
 }
 
@@ -642,4 +646,11 @@ func ChatInputBaseStyle(focused bool) lipgloss.Style {
 		Background(colorBase).
 		Padding(0, 1)
 
+}
+
+// ansiBg returns the ANSI escape sequence to set the background to the given
+// hex color.  Input is a lipgloss.Color string like "#1a1b26".
+func ansiBg(c lipgloss.Color) string {
+	// termenv.TrueColor.Color() handles hex strings like "#RRGGBB".
+	return termenv.TrueColor.Color(string(c)).Sequence(true)
 }
