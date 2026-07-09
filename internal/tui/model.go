@@ -252,7 +252,7 @@ var defaultMenuItems = []MenuItem{
 func New(agent aiagent.AIAgent) *RootModel {
 	// Apply theme from config (overrides default Tokyo Night from init()).
 	cfg := loadConfig()
-	themeName := cfg.ResolveTheme()
+	themeName := cfg.Theme
 	if colors, ok := themeByName[themeName]; ok && themeName != "tokyo-night" {
 		initStyles(colors)
 	}

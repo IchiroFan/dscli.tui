@@ -7,8 +7,10 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -648,9 +650,19 @@ func ChatInputBaseStyle(focused bool) lipgloss.Style {
 
 }
 
-// ansiBg returns the ANSI escape sequence to set the background to the given
-// hex color.  Input is a lipgloss.Color string like "#1a1b26".
+// ansiBg returns the complete ANSI escape sequence to set the background to the
+// given hex color.  Input is a lipgloss.Color string like "#1a1b26".
+// Returns e.g. "\x1b[48;2;26;27;38m".
+//
+// Note: termenv.RGBColor.Sequence(true) returns only "48;2;R;G;B" without the
+// \x1b[ prefix and m suffix — those must be added to form a complete ANSI code.
 func ansiBg(c lipgloss.Color) string {
-	// termenv.TrueColor.Color() handles hex strings like "#RRGGBB".
-	return termenv.TrueColor.Color(string(c)).Sequence(true)
+	s := strings.TrimPrefix(string(c), "#")
+	if len(s) != 6 {
+		return ""
+	}
+	r, _ := strconv.ParseUint(s[0:2], 16, 8)
+	g, _ := strconv.ParseUint(s[2:4], 16, 8)
+	b, _ := strconv.ParseUint(s[4:6], 16, 8)
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b)
 }
