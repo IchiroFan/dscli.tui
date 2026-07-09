@@ -252,10 +252,10 @@ var defaultMenuItems = []MenuItem{
 func New(agent aiagent.AIAgent) *RootModel {
 	// Apply theme from config (overrides default Tokyo Night from init()).
 	cfg := loadConfig()
-	if colors, ok := themeByName[cfg.Theme]; ok && cfg.Theme != "" && cfg.Theme != "tokyo-night" {
+	themeName := cfg.ResolveTheme()
+	if colors, ok := themeByName[themeName]; ok && themeName != "tokyo-night" {
 		initStyles(colors)
 	}
-
 	// ── Multi-line chat input (textarea) ──────────────────────────
 	ta := textarea.New()
 	ta.Placeholder = "Type your message... (Ctrl+J ↵)"
