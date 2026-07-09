@@ -147,10 +147,10 @@ var (
 
 var (
 	// ── Layout ──────────────────────────────────────────────────────────
-	AppStyle     lipgloss.Style
-	HeaderStyle  lipgloss.Style
-	HelpStyle    lipgloss.Style
-	ErrorStyle   lipgloss.Style
+	AppStyle    lipgloss.Style
+	HeaderStyle lipgloss.Style
+	HelpStyle   lipgloss.Style
+	ErrorStyle  lipgloss.Style
 
 	// ── Dashboard / Menu ────────────────────────────────────────────────
 	MenuItemStyle     lipgloss.Style
@@ -160,12 +160,12 @@ var (
 	LogoStyle         lipgloss.Style
 
 	// ── List ───────────────────────────────────────────────────────────
-	ListItemStyle      lipgloss.Style
-	ListSelectedStyle  lipgloss.Style
-	TimestampStyle     lipgloss.Style
+	ListItemStyle       lipgloss.Style
+	ListSelectedStyle   lipgloss.Style
+	TimestampStyle      lipgloss.Style
 	ContentPreviewStyle lipgloss.Style
-	NoDataStyle        lipgloss.Style
-	PageInfoStyle      lipgloss.Style
+	NoDataStyle         lipgloss.Style
+	PageInfoStyle       lipgloss.Style
 
 	// ── Detail ──────────────────────────────────────────────────────────
 	SectionHeadingStyle lipgloss.Style
@@ -181,11 +181,11 @@ var (
 	SpinnerDoneStyle       lipgloss.Style
 
 	// ── Chat Bubbles ──────────────────────────────────────────────────
-	UserBubbleBase      lipgloss.Style
-	AssistantBubbleBase lipgloss.Style
-	ThinkBubbleBase     lipgloss.Style
-	ThinkLineStyle      lipgloss.Style
-	ToolLineStyle       lipgloss.Style
+	UserBubbleBase       lipgloss.Style
+	AssistantBubbleBase  lipgloss.Style
+	ThinkBubbleBase      lipgloss.Style
+	ThinkLineStyle       lipgloss.Style
+	ToolLineStyle        lipgloss.Style
 	TruncationWarnBubble lipgloss.Style
 
 	// ── Unified bubble inner styles ───────────────────────────────────
@@ -472,7 +472,8 @@ func initStyles(c Colors) {
 		Foreground(colorPrimary).
 		Bold(true).
 		Padding(0, 1)
-	}
+}
+
 // init applies the default Tokyo Night theme so all package-level style
 // variables are initialized early. It also forces termenv.TrueColor to ensure
 // lipgloss always emits ANSI escape codes (background fills, foreground text,
@@ -642,6 +643,7 @@ func ChatInputBaseStyle(focused bool) lipgloss.Style {
 		borderColor = colorOverlay
 	}
 	return lipgloss.NewStyle().
+		Background(colorBase).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
 		Foreground(colorText).
