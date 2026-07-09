@@ -1,304 +1,492 @@
 // Package tui implements the Bubble Tea application for dscli.tui.
 //
-// Styles follow the Tokyo Night color palette, inspired by
-// the dscli.gitcode project's design system.
+// Styles are managed through a theme system.  At startup, initStyles is called
+// (once during package init with Tokyo Night, and again by New() if the user's
+// config specifies a different theme).  All style variables are recomputed from
+// the active Colors palette.
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
-// ─── Colors (Tokyo Night palette) ───────────────────────────────────────────
+// ─── Theme Colors ─────────────────────────────────────────────────────────
 
+// Colors holds the complete color palette for a theme.
+type Colors struct {
+	Base    lipgloss.Color // Dark background
+	Surface lipgloss.Color // Panel background
+	Overlay lipgloss.Color // Muted borders
+	Text    lipgloss.Color // Light text
+	Subtext lipgloss.Color // Dim text
+	Primary lipgloss.Color // Primary accent
+	Green   lipgloss.Color // Success
+	Peach   lipgloss.Color // Warm accent
+	Red     lipgloss.Color // Soft red
+	Blue    lipgloss.Color // Cyan
+	Mauve   lipgloss.Color // Mauve
+	Yellow  lipgloss.Color // Gold
+	Teal    lipgloss.Color // Teal
+}
+
+// Theme definitions (5 built-in color schemes).
 var (
-	colorBase    = lipgloss.Color("#1a1b26") // Dark background
-	colorSurface = lipgloss.Color("#24253e") // Panel background
-	colorOverlay = lipgloss.Color("#565f89") // Muted borders
-	colorText    = lipgloss.Color("#c0caf5") // Light text
-	colorSubtext = lipgloss.Color("#9aa5ce") // Dim text
-	colorPrimary = lipgloss.Color("#7aa2f7") // Primary blue
-	colorGreen   = lipgloss.Color("#9ece6a") // Success
-	colorPeach   = lipgloss.Color("#ff9e64") // Warm accent
-	colorRed     = lipgloss.Color("#f7768e") // Soft red
-	colorBlue    = lipgloss.Color("#2ac3de") // Cyan
-	colorMauve   = lipgloss.Color("#bb9af7") // Mauve
-	colorYellow  = lipgloss.Color("#e0af68") // Gold
-	colorTeal    = lipgloss.Color("#1abc9c") // Teal
+	// ThemeTokyoNight is the default dark theme with deep blue-purple tones.
+	ThemeTokyoNight = Colors{
+		Base:    "#1a1b26",
+		Surface: "#24253e",
+		Overlay: "#565f89",
+		Text:    "#c0caf5",
+		Subtext: "#9aa5ce",
+		Primary: "#7aa2f7",
+		Green:   "#9ece6a",
+		Peach:   "#ff9e64",
+		Red:     "#f7768e",
+		Blue:    "#2ac3de",
+		Mauve:   "#bb9af7",
+		Yellow:  "#e0af68",
+		Teal:    "#1abc9c",
+	}
+
+	// ThemeDracula is a dark purple-themed palette inspired by the Dracula scheme.
+	ThemeDracula = Colors{
+		Base:    "#282a36",
+		Surface: "#44475a",
+		Overlay: "#6272a4",
+		Text:    "#f8f8f2",
+		Subtext: "#b0b0c0",
+		Primary: "#bd93f9",
+		Green:   "#50fa7b",
+		Peach:   "#ffb86c",
+		Red:     "#ff5555",
+		Blue:    "#8be9fd",
+		Mauve:   "#ff79c6",
+		Yellow:  "#f1fa8c",
+		Teal:    "#66d9ef",
+	}
+
+	// ThemeMonokai is a high-contrast dark palette inspired by Monokai.
+	ThemeMonokai = Colors{
+		Base:    "#272822",
+		Surface: "#3e3d32",
+		Overlay: "#75715e",
+		Text:    "#f8f8f2",
+		Subtext: "#a7a58a",
+		Primary: "#66d9ef",
+		Green:   "#a6e22e",
+		Peach:   "#fd971f",
+		Red:     "#f92672",
+		Blue:    "#89d7f8",
+		Mauve:   "#ae81ff",
+		Yellow:  "#e6db74",
+		Teal:    "#a1efe4",
+	}
+
+	// ThemeNord is an arctic blue-themed palette inspired by Nord.
+	ThemeNord = Colors{
+		Base:    "#2e3440",
+		Surface: "#3b4252",
+		Overlay: "#4c566a",
+		Text:    "#d8dee9",
+		Subtext: "#7f8c9d",
+		Primary: "#88c0d0",
+		Green:   "#a3be8c",
+		Peach:   "#d08770",
+		Red:     "#bf616a",
+		Blue:    "#8fbcbb",
+		Mauve:   "#b48ead",
+		Yellow:  "#ebcb8b",
+		Teal:    "#81a1c1",
+	}
+
+	// ThemeSolarizedLight is a light theme with warm, low-contrast tones.
+	ThemeSolarizedLight = Colors{
+		Base:    "#fdf6e3",
+		Surface: "#eee8d5",
+		Overlay: "#93a1a1",
+		Text:    "#657b83",
+		Subtext: "#839496",
+		Primary: "#268bd2",
+		Green:   "#859900",
+		Peach:   "#cb4b16",
+		Red:     "#dc322f",
+		Blue:    "#2aa198",
+		Mauve:   "#6c71c4",
+		Yellow:  "#b58900",
+		Teal:    "#00a0a0",
+	}
 )
 
-// ─── Layout Styles ──────────────────────────────────────────────────────────
+// themeByName maps user-facing names to Colors.
+var themeByName = map[string]Colors{
+	"tokyo-night":     ThemeTokyoNight,
+	"dracula":         ThemeDracula,
+	"monokai":         ThemeMonokai,
+	"nord":            ThemeNord,
+	"solarized-light": ThemeSolarizedLight,
+}
+
+// ─── Color variables (declared, set by initStyles) ────────────────────────
 
 var (
-	// AppStyle is the outer container for all non-chat screens.
+	colorBase, colorSurface, colorOverlay lipgloss.Color
+	colorText, colorSubtext               lipgloss.Color
+	colorPrimary, colorGreen, colorPeach  lipgloss.Color
+	colorRed, colorBlue, colorMauve       lipgloss.Color
+	colorYellow, colorTeal                lipgloss.Color
+)
+
+// ─── Style variables (declared, set by initStyles) ────────────────────────
+
+var (
+	// ── Layout ──────────────────────────────────────────────────────────
+	AppStyle     lipgloss.Style
+	HeaderStyle  lipgloss.Style
+	HelpStyle    lipgloss.Style
+	ErrorStyle   lipgloss.Style
+
+	// ── Dashboard / Menu ────────────────────────────────────────────────
+	MenuItemStyle     lipgloss.Style
+	MenuSelectedStyle lipgloss.Style
+	MenuDescStyle     lipgloss.Style
+	TitleStyle        lipgloss.Style
+	LogoStyle         lipgloss.Style
+
+	// ── List ───────────────────────────────────────────────────────────
+	ListItemStyle      lipgloss.Style
+	ListSelectedStyle  lipgloss.Style
+	TimestampStyle     lipgloss.Style
+	ContentPreviewStyle lipgloss.Style
+	NoDataStyle        lipgloss.Style
+	PageInfoStyle      lipgloss.Style
+
+	// ── Detail ──────────────────────────────────────────────────────────
+	SectionHeadingStyle lipgloss.Style
+	DetailLabelStyle    lipgloss.Style
+	DetailValueStyle    lipgloss.Style
+	DetailContentStyle  lipgloss.Style
+
+	// ── Chat (non-bubble) ─────────────────────────────────────────────
+	ChatLoadingStyle       lipgloss.Style
+	ChatRoleUserStyle      lipgloss.Style
+	ChatRoleAssistantStyle lipgloss.Style
+	SpinnerStyle           lipgloss.Style
+	SpinnerDoneStyle       lipgloss.Style
+
+	// ── Chat Bubbles ──────────────────────────────────────────────────
+	UserBubbleBase      lipgloss.Style
+	AssistantBubbleBase lipgloss.Style
+	ThinkBubbleBase     lipgloss.Style
+	ThinkLineStyle      lipgloss.Style
+	ToolLineStyle       lipgloss.Style
+	TruncationWarnBubble lipgloss.Style
+
+	// ── Unified bubble inner styles ───────────────────────────────────
+	AssistantBodyStyle  lipgloss.Style
+	ThinkBodyStyle      lipgloss.Style
+	ToolBodyStyle       lipgloss.Style
+	StateBodyStyle      lipgloss.Style
+	TruncationBodyStyle lipgloss.Style
+
+	// ── Badges ──────────────────────────────────────────────────────────
+	BadgeSuccessStyle lipgloss.Style
+	BadgeWarnStyle    lipgloss.Style
+
+	// ── Status Bar ─────────────────────────────────────────────────────
+	StatusBarBg   lipgloss.Style
+	StatusVersion lipgloss.Style
+	StatusLabel   lipgloss.Style
+	StatusSep     lipgloss.Style
+	StatusScreen  lipgloss.Style
+)
+
+// initStyles sets all color and style variables from the given Colors palette.
+// Called once during package init (with Tokyo Night) and again by New() if
+// the user's config specifies a different theme.
+func initStyles(c Colors) {
+	// ── Set color vars ───────────────────────────────────────────────
+	colorBase = c.Base
+	colorSurface = c.Surface
+	colorOverlay = c.Overlay
+	colorText = c.Text
+	colorSubtext = c.Subtext
+	colorPrimary = c.Primary
+	colorGreen = c.Green
+	colorPeach = c.Peach
+	colorRed = c.Red
+	colorBlue = c.Blue
+	colorMauve = c.Mauve
+	colorYellow = c.Yellow
+	colorTeal = c.Teal
+
+	// ── Layout Styles ────────────────────────────────────────────────
+
 	AppStyle = lipgloss.NewStyle().
-			Foreground(colorText).
-			Padding(1, 2)
+		Background(colorBase).
+		Foreground(colorText).
+		Padding(1, 2)
 
-	// HeaderStyle for screen titles.
 	HeaderStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorPrimary).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderBottom(true).
-			BorderForeground(colorOverlay).
-			PaddingBottom(1).
-			MarginBottom(1)
+		Background(colorBase).
+		Bold(true).
+		Foreground(colorPrimary).
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderBottom(true).
+		BorderForeground(colorOverlay).
+		PaddingBottom(1).
+		MarginBottom(1)
 
-	// HelpStyle for keyboard hint lines.
 	HelpStyle = lipgloss.NewStyle().
-			Foreground(colorSubtext).
-			MarginTop(1)
+		Background(colorBase).
+		Foreground(colorSubtext).
+		MarginTop(1)
 
-	// ErrorStyle for error messages.
 	ErrorStyle = lipgloss.NewStyle().
-			Foreground(colorRed).
-			Bold(true).
-			Padding(0, 1)
-)
+		Background(colorBase).
+		Foreground(colorRed).
+		Bold(true).
+		Padding(0, 1)
+	// ── Dashboard / Menu Styles ──────────────────────────────────────
 
-// ─── Dashboard Styles ───────────────────────────────────────────────────────
-
-var (
-	// MenuItemStyle for unselected menu items.
 	MenuItemStyle = lipgloss.NewStyle().
-			Foreground(colorText).
-			PaddingLeft(2)
+		Background(colorBase).
+		Foreground(colorText).
+		PaddingLeft(2)
 
-	// MenuSelectedStyle for the currently highlighted menu item.
 	MenuSelectedStyle = lipgloss.NewStyle().
-				Foreground(colorPrimary).
-				Bold(true).
-				PaddingLeft(1)
+		Background(colorBase).
+		Foreground(colorPrimary).
+		Bold(true).
+		PaddingLeft(1)
 
-	// MenuDescStyle for the inline description text (same line, dim).
 	MenuDescStyle = lipgloss.NewStyle().
-			Foreground(colorSubtext)
+		Background(colorBase).
+		Foreground(colorSubtext)
 
-	// TitleStyle for section titles within a screen.
 	TitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorMauve).
-			MarginBottom(1)
+		Background(colorBase).
+		Bold(true).
+		Foreground(colorMauve).
+		MarginBottom(1)
 
-	// LogoStyle for the dscli ASCII art frame.
 	LogoStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorPrimary).
-			Border(lipgloss.DoubleBorder()).
-			BorderForeground(colorOverlay).
-			Padding(0, 2).
-			MarginBottom(1)
-)
+		Background(colorBase).
+		Bold(true).
+		Foreground(colorPrimary).
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(colorOverlay).
+		Padding(0, 2).
+		MarginBottom(1)
 
-// ─── List Styles ────────────────────────────────────────────────────────────
+	// ── List Styles ──────────────────────────────────────────────────
 
-var (
-	// ListItemStyle for unselected list items.
 	ListItemStyle = lipgloss.NewStyle().
-			Foreground(colorText).
-			PaddingLeft(2)
+		Background(colorBase).
+		Foreground(colorText).
+		PaddingLeft(2)
 
 	ListSelectedStyle = lipgloss.NewStyle().
-				Foreground(colorPrimary).
-				Bold(true).
-				PaddingLeft(1)
+		Background(colorBase).
+		Foreground(colorPrimary).
+		Bold(true).
+		PaddingLeft(1)
 
-
-	// TimestampStyle for metadata (dates, IDs, counts).
 	TimestampStyle = lipgloss.NewStyle().
-			Foreground(colorSubtext).
-			Italic(true)
+		Background(colorBase).
+		Foreground(colorSubtext).
+		Italic(true)
 
-	// ContentPreviewStyle for truncated content previews.
 	ContentPreviewStyle = lipgloss.NewStyle().
-				Foreground(colorSubtext).
-				PaddingLeft(4)
+		Background(colorBase).
+		Foreground(colorSubtext).
+		PaddingLeft(4)
 
-	// NoDataStyle for empty-state messages.
 	NoDataStyle = lipgloss.NewStyle().
-			Foreground(colorSubtext).
-			Italic(true).
-			PaddingLeft(2).
-			MarginTop(1)
+		Background(colorBase).
+		Foreground(colorSubtext).
+		Italic(true).
+		PaddingLeft(2).
+		MarginTop(1)
 
-	// PageInfoStyle for the pagination indicator (page X/Y, items range).
 	PageInfoStyle = lipgloss.NewStyle().
-			Foreground(colorMauve).
-			Bold(true).
-			PaddingLeft(2)
+		Background(colorBase).
+		Foreground(colorMauve).
+		Bold(true).
+		PaddingLeft(2)
 
-)
-// ─── Detail Styles ──────────────────────────────────────────────────────────
+	// ── Detail Styles ────────────────────────────────────────────────
 
-var (
-	// SectionHeadingStyle for detail section headers.
 	SectionHeadingStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(colorMauve).
-				MarginTop(1).
-				MarginBottom(1)
+		Background(colorBase).
+		Bold(true).
+		Foreground(colorMauve).
+		MarginTop(1).
+		MarginBottom(1)
 
-	// DetailLabelStyle for field labels (right-aligned, fixed width).
 	DetailLabelStyle = lipgloss.NewStyle().
-				Foreground(colorSubtext).
-				Width(14).
-				Align(lipgloss.Right).
-				PaddingRight(1)
+		Background(colorBase).
+		Foreground(colorSubtext).
+		Width(14).
+		Align(lipgloss.Right).
+		PaddingRight(1)
 
-	// DetailValueStyle for field values.
 	DetailValueStyle = lipgloss.NewStyle().
-				Foreground(colorText)
+		Background(colorBase).
+		Foreground(colorText)
 
-	// DetailContentStyle for multi-line content sections.
 	DetailContentStyle = lipgloss.NewStyle().
-				Foreground(colorText).
-				PaddingLeft(2)
-)
+		Background(colorBase).
+		Foreground(colorText).
+		PaddingLeft(2)
 
-// ─── Chat Styles ────────────────────────────────────────────────────────────
+	// ── Chat (non-bubble) Styles ─────────────────────────────────────
 
-var (
-	// ChatLoadingStyle for the "AI is thinking..." indicator.
 	ChatLoadingStyle = lipgloss.NewStyle().
-				Foreground(colorSubtext).
-				Italic(true).
-				PaddingLeft(2)
+		Background(colorBase).
+		Foreground(colorSubtext).
+		Italic(true).
+		PaddingLeft(2)
 
-	// ChatRoleUserStyle for "You:" role labels.
 	ChatRoleUserStyle = lipgloss.NewStyle().
-				Foreground(colorGreen).
-				Bold(true)
+		Background(colorBase).
+		Foreground(colorGreen).
+		Bold(true)
 
-	// ChatRoleAssistantStyle for "AI:" role labels.
 	ChatRoleAssistantStyle = lipgloss.NewStyle().
-				Foreground(colorPrimary).
-				Bold(true)
+		Background(colorBase).
+		Foreground(colorPrimary).
+		Bold(true)
 
 	SpinnerStyle = lipgloss.NewStyle().
-			Foreground(colorPrimary).
-			Bold(true)
+		Background(colorBase).
+		Foreground(colorPrimary).
+		Bold(true)
 
 	SpinnerDoneStyle = lipgloss.NewStyle().
-				Foreground(colorGreen).
-				Bold(true)
-)
+		Background(colorBase).
+		Foreground(colorGreen).
+		Bold(true)
 
-// ─── Chat Bubble Styles ─────────────────────────────────────────────────────
+	// ── Chat Bubble Styles (Surface background for visual distinction) ───
 
-var (
-	// UserBubbleBase for user message bubbles. Call .MaxWidth(w) at render time.
 	UserBubbleBase = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorGreen).
-			Padding(0, 1)
+		Background(colorSurface).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorGreen).
+		Padding(0, 1)
 
-	// AssistantBubbleBase for assistant message bubbles.
 	AssistantBubbleBase = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colorPrimary).
-				Padding(0, 1)
+		Background(colorSurface).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPrimary).
+		Padding(0, 1)
 
-	// ThinkBubbleBase for reasoning/thinking bubbles (mauve border).
 	ThinkBubbleBase = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorMauve).
-			Padding(0, 1)
+		Background(colorSurface).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorMauve).
+		Padding(0, 1)
 
-	// ThinkLineStyle for reasoning/thinking content (italic, dim).
 	ThinkLineStyle = lipgloss.NewStyle().
-			Foreground(colorSubtext).
-			Italic(true)
+		Background(colorBase).
+		Foreground(colorSubtext).
+		Italic(true)
 
-	// ToolLineStyle for tool-call result lines (yellow, italic).
 	ToolLineStyle = lipgloss.NewStyle().
-			Foreground(colorYellow).
-			Italic(true)
+		Background(colorBase).
+		Foreground(colorYellow).
+		Italic(true)
 
-	// TruncationWarnBubble for truncation warnings (red, bold, centered).
 	TruncationWarnBubble = lipgloss.NewStyle().
-				Foreground(colorRed).
-				Bold(true)
+		Background(colorBase).
+		Foreground(colorRed).
+		Bold(true)
 
-	// ── Unified bubble internal styles ─────────────────────────────────
+	// ── Unified bubble inner styles ──────────────────────────────────
 
-	// AssistantBodyStyle: white/bold for assistant's final answer.
 	AssistantBodyStyle = lipgloss.NewStyle().
-				Foreground(colorText).
-				Bold(true)
+		Background(colorBase).
+		Foreground(colorText).
+		Bold(true)
 
-	// ThinkBodyStyle: italic dim for thinking content inside unified bubble.
 	ThinkBodyStyle = lipgloss.NewStyle().
-			Foreground(colorSubtext).
-			Italic(true)
+		Background(colorBase).
+		Foreground(colorSubtext).
+		Italic(true)
 
-	// ToolBodyStyle: yellow/italic for tool results inside unified bubble.
 	ToolBodyStyle = lipgloss.NewStyle().
-			Foreground(colorYellow).
-			Italic(true)
+		Background(colorBase).
+		Foreground(colorYellow).
+		Italic(true)
 
-	// StateBodyStyle: subtle for session-state lines.
 	StateBodyStyle = lipgloss.NewStyle().
-			Foreground(colorSubtext).
-			Italic(true)
+		Background(colorBase).
+		Foreground(colorSubtext).
+		Italic(true)
 
-	// TruncationBodyStyle: red/bold for truncation warning inside bubble.
 	TruncationBodyStyle = lipgloss.NewStyle().
-				Foreground(colorRed).
-				Bold(true)
-)
+		Background(colorBase).
+		Foreground(colorRed).
+		Bold(true)
+
+	// ── Status Badge Styles ──────────────────────────────────────────
+
+	BadgeSuccessStyle = lipgloss.NewStyle().
+		Background(colorBase).
+		Foreground(colorGreen).
+		Bold(true)
+
+	BadgeWarnStyle = lipgloss.NewStyle().
+		Background(colorBase).
+		Foreground(colorYellow).
+		Bold(true)
+
+	// ── Status Bar Styles ────────────────────────────────────────────
+
+	StatusBarBg = lipgloss.NewStyle().
+		Background(colorBase)
+
+	StatusVersion = lipgloss.NewStyle().
+		Background(colorMauve).
+		Foreground(colorBase).
+		Bold(true).
+		Padding(0, 1)
+
+	StatusLabel = lipgloss.NewStyle().
+		Background(colorBase).
+		Foreground(colorSubtext)
+
+	StatusSep = lipgloss.NewStyle().
+		Background(colorBase).
+		Foreground(colorOverlay)
+
+	StatusScreen = lipgloss.NewStyle().
+		Background(colorBase).
+		Foreground(colorPrimary).
+		Bold(true).
+		Padding(0, 1)
+	}
+// init applies the default Tokyo Night theme so all package-level style
+// variables are initialized early. It also forces termenv.TrueColor to ensure
+// lipgloss always emits ANSI escape codes (background fills, foreground text,
+// etc.) regardless of terminal auto-detection.
+func init() {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	initStyles(ThemeTokyoNight)
+}
 
 // BubbleMaxPercent is the maximum bubble width as a percentage of available
 // content width (excludes borders and padding).
 const BubbleMaxPercent = 72
 
-// ─── Status Badge Styles ────────────────────────────────────────────────────
-
-var (
-	// BadgeSuccessStyle for success badges.
-	BadgeSuccessStyle = lipgloss.NewStyle().
-				Foreground(colorGreen).
-				Bold(true)
-
-	// BadgeWarnStyle for warning badges.
-	BadgeWarnStyle = lipgloss.NewStyle().
-			Foreground(colorYellow).
-			Bold(true)
-)
-
-// ─── Status Bar Styles ──────────────────────────────────────────────────────
-
-var (
-	// StatusBarBg is the full-width bar background.
-	StatusBarBg = lipgloss.NewStyle().
-			Background(colorSurface)
-
-	// StatusVersion is the version badge (mauve bg, dark text).
-	StatusVersion = lipgloss.NewStyle().
-			Background(colorMauve).
-			Foreground(colorBase).
-			Bold(true).
-			Padding(0, 1)
-
-	// StatusLabel for labels like 📁 project / 🤖 model.
-	StatusLabel = lipgloss.NewStyle().
-			Foreground(colorSubtext)
-
-	// StatusSep is the separator between sections.
-	StatusSep = lipgloss.NewStyle().
-			Foreground(colorOverlay)
-
-	// StatusScreen is the current screen name (primary accent).
-	StatusScreen = lipgloss.NewStyle().
-			Foreground(colorPrimary).
-			Bold(true).
-			Padding(0, 1)
-)
-
-// ─── Bubble Rendering ───────────────────────────────────────────────────────
+// ─── Bubble Rendering ─────────────────────────────────────────────────────
 
 // PadBubbleToWidth right-pads each line of a rendered bubble string with spaces
 // so the total visual width equals targetW (excluding ANSI sequences).
@@ -313,6 +501,7 @@ func PadBubbleToWidth(s string, targetW int) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
 // RenderBubble renders a chat bubble with proper word-wrapping.
 //
 // In lipgloss v1.1.0, MaxWidth incorrectly truncates content instead of
@@ -359,7 +548,7 @@ func RenderBubble(base lipgloss.Style, prefix, content string, wrapStyle lipglos
 	return base.Render(strings.Join(wrappedLines, "\n"))
 }
 
-// ─── Padding Helpers ────────────────────────────────────────────────────────
+// ─── Padding Helpers ──────────────────────────────────────────────────────
 // These use plain spaces instead of lipgloss alignment to avoid
 // ANSI-on-ANSI rendering corruption that caused top-border clipping.
 
@@ -410,7 +599,7 @@ func PadCenter(s string, w int) string {
 	return strings.Join(lines, "\n")
 }
 
-// ─── Utility Helpers ────────────────────────────────────────────────────────
+// ─── Utility Helpers ──────────────────────────────────────────────────────
 
 // TruncateStr truncates a string to max runes, replacing newlines with spaces.
 func TruncateStr(s string, max int) string {
@@ -456,5 +645,24 @@ func ChatInputBaseStyle(focused bool) lipgloss.Style {
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
 		Foreground(colorText).
+		Background(colorBase).
 		Padding(0, 1)
+
+}
+
+// ansiBg returns the complete ANSI escape sequence to set the background to the
+// given hex color.  Input is a lipgloss.Color string like "#1a1b26".
+// Returns e.g. "\x1b[48;2;26;27;38m".
+//
+// Note: termenv.RGBColor.Sequence(true) returns only "48;2;R;G;B" without the
+// \x1b[ prefix and m suffix — those must be added to form a complete ANSI code.
+func ansiBg(c lipgloss.Color) string {
+	s := strings.TrimPrefix(string(c), "#")
+	if len(s) != 6 {
+		return ""
+	}
+	r, _ := strconv.ParseUint(s[0:2], 16, 8)
+	g, _ := strconv.ParseUint(s[2:4], 16, 8)
+	b, _ := strconv.ParseUint(s[4:6], 16, 8)
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b)
 }

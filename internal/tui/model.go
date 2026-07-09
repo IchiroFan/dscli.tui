@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/dscli/dscli.tui/internal/aiagent"
 	"github.com/dscli/dscli.tui/internal/tui/protocol"
@@ -249,6 +250,12 @@ var defaultMenuItems = []MenuItem{
 
 // New creates a new RootModel with the given agent.
 func New(agent aiagent.AIAgent) *RootModel {
+	// Apply theme from config (overrides default Tokyo Night from init()).
+	cfg := loadConfig()
+	themeName := cfg.Theme
+	if colors, ok := themeByName[themeName]; ok && themeName != "tokyo-night" {
+		initStyles(colors)
+	}
 	// ── Multi-line chat input (textarea) ──────────────────────────
 	ta := textarea.New()
 	ta.Placeholder = "Type your message... (Ctrl+J ↵)"
@@ -257,7 +264,6 @@ func New(agent aiagent.AIAgent) *RootModel {
 	ta.CharLimit = 0  // no limit
 	ta.SetHeight(3)   // fixed 3-line input area
 	ta.MaxHeight = 10 // max 10 lines before internal scroll
-
 	// Enter → send, Ctrl+J → newline (Shift+Enter works on some terminals)
 	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "ctrl+j")
 
@@ -266,6 +272,21 @@ func New(agent aiagent.AIAgent) *RootModel {
 	ta.BlurredStyle.Base = ChatInputBaseStyle(false)
 
 	ta.Focus() // focus for text input; ignore cursor cmd
+
+	// Prevent cursor-line highlighting: set uniform background on all
+	// textarea inner styles so they match the theme's Base color.
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle().Background(colorBase)
+	ta.FocusedStyle.Text = lipgloss.NewStyle().Background(colorBase)
+	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle().Background(colorBase)
+	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().
+		Background(colorBase).
+		Foreground(colorSubtext)
+	ta.BlurredStyle.CursorLine = lipgloss.NewStyle().Background(colorBase)
+	ta.BlurredStyle.Text = lipgloss.NewStyle().Background(colorBase)
+	ta.BlurredStyle.EndOfBuffer = lipgloss.NewStyle().Background(colorBase)
+	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().
+		Background(colorBase).
+		Foreground(colorSubtext)
 
 	// ── AskUser single-line input ─────────────────────────────────
 	askInput := textinput.New()

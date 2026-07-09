@@ -2,12 +2,12 @@
 
 ```text
                +-------------------+
-     o        | dscli.tui         |
-    /|\       | Terminal UI       |
-     |   +----+ AI-powered CLI    |
-    / \  |    +-------------------+
-  ~~~~~~~|~~~~
- dscli   |  TUI frontend
+      o        | dscli.tui         |
+     /|\       | Terminal UI       |
+      |   +----+ AI-powered CLI    |
+     / \  |    +-------------------+
+   ~~~~~~~|~~~~
+  dscli   |  TUI frontend
 ```
 
 ## 🎯 What is dscli.tui?
@@ -184,7 +184,9 @@ internal/
     ├── update.go        — Update loop (all screen handlers, 1600+ lines)
     ├── view.go          — View rendering (all screen views)
     ├── commands.go      — tea.Cmd factories
-    ├── styles.go        — Tokyo Night color palette & lipgloss styles
+    ├── styles.go        — Theme color palettes & lipgloss styles
+    ├── config.go        — Config loading (~/.dscli-tui/config.yaml)
+    ├── config_test.go   — Config & theme tests
     ├── model_test.go    — Model tests
     ├── history_arrow_test.go
     ├── history_flow_test.go
@@ -233,6 +235,35 @@ dscli-tui
 ```
 
 A `dscli` executable must be in your `$PATH`. The TUI resolves it automatically on startup.
+
+---
+
+## ⚙️ Configuration
+
+dscli.tui reads settings from `~/.dscli-tui/config.yaml`. If the file doesn't exist, sensible defaults are used.
+
+### Theme
+
+The `theme` key controls the color scheme. Five built-in themes are available:
+
+| Name | Type | Description | Base Background |
+|------|------|-------------|-----------------|
+| `tokyo-night` | Dark | **Default** — deep blue-purple tones | `#1a1b26` |
+| `dracula` | Dark | Purple-themed Dracula scheme | `#282a36` |
+| `monokai` | Dark | High-contrast Monokai palette | `#272822` |
+| `nord` | Dark | Arctic blue Nord-inspired palette | `#2e3440` |
+| `solarized-light` | Light | Warm, low-contrast light theme | `#fdf6e3` |
+
+#### Example config file
+
+```yaml
+# ~/.dscli-tui/config.yaml
+
+# Pick a theme: tokyo-night, dracula, monokai, nord, solarized-light
+theme: tokyo-night
+```
+
+Change the theme at any time by editing this file and restarting dscli-tui.
 
 ---
 
@@ -338,7 +369,8 @@ Current coverage: `internal/tui/` package — 5 test files, all passing.
 
 ## 🎨 Design
 
-- **Color palette**: Tokyo Night (`#1a1b26` background, `#7aa2f7` primary, `#9ece6a` success)
+- **Theme system** — 5 built-in color palettes. All styles are derived from a single `Colors` struct and recomputed on theme change.
+- **Theme names**: `tokyo-night` (default, dark), `dracula` (dark), `monokai` (dark), `nord` (dark), `solarized-light` (light)
 - **Font**: Terminal default (no special glyph requirements)
 - **Frameworks**: [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lip Gloss](https://github.com/charmbracelet/lipgloss) + [Bubbles](https://github.com/charmbracelet/bubbles)
 
@@ -361,7 +393,7 @@ make test
 
 - **AIAgent interface** — Keep the TUI decoupled from dscli internals. New features should extend the interface, not bypass it.
 - **Screen enum** — Each new screen gets a `Screen*` constant, an `update*` handler, and a `view*` method.
-- **Style** — Follow existing patterns (Tokyo Night palette, lipgloss styles in `styles.go`).
+- **Style** — Follow existing patterns (theme system in `styles.go`, config in `config.go`).
 - **Tests** — Add tests for new list parsers and model behavior.
 
 ---
